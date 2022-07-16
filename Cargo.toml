@@ -1,0 +1,16 @@
+[package]
+name = "_3dprintd"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "3dprintd"
+path = "src/main.rs"
+
+[dependencies]
+rocket = "0.4.11"
+serialport = "4.2.0"
+revpi = { git = "https://github.com/PS-3D/revpi-rs", branch = "dev", version = "0.1.0" }
+nanotec-stepper-driver = { git = "https://github.com/PS-3D/nanotec-stepper-driver", branch = "dev", version = "0.1.0" }
