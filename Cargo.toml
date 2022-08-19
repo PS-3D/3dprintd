@@ -10,6 +10,8 @@ name = "3dprintd"
 path = "src/main.rs"
 
 [dependencies]
+# chose 5 instead of 4 even tho 5 isn't out yet due to 5 having an option
+# to shutdown rocket properly and not just killing the process
 rocket = "0.5.0-rc.2"
 gcode = "0.6.1"
 figment = { version = "0.10.6", features = ["toml"]}
@@ -21,5 +23,5 @@ clap = { version = "3.2.12", features = ["derive"] }
 log = "0.4.17"
 # temporary, will be switched with a more fitting logger once we get to that
 stderrlog = "0.5.3"
-revpi = { git = "https://github.com/PS-3D/revpi-rs", branch = "dev", version = "0.1.0" }
+revpi = { git = "https://github.com/PS-3D/revpi-rs", branch = "dev", version = "0.1.0", features = ["macro"] }
 nanotec-stepper-driver = { git = "https://github.com/PS-3D/nanotec-stepper-driver", branch = "dev", version = "0.1.0" }
