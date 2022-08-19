@@ -1,4 +1,5 @@
 mod args;
+mod motors;
 
 use anyhow::Result;
 use args::Args;
@@ -8,6 +9,7 @@ use figment::{
     Figment,
 };
 use log::debug;
+pub use motors::Motors;
 use rocket::config::Config as RocketConfig;
 use serde::Deserialize;
 use std::net::{IpAddr, Ipv4Addr};
@@ -51,17 +53,10 @@ impl From<Api> for RocketConfig {
 //
 
 #[derive(Debug, Deserialize)]
-#[serde(default)]
 pub struct Config {
+    #[serde(default)]
     pub api: Api,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            api: Api::default(),
-        }
-    }
+    pub motors: Motors,
 }
 
 //
