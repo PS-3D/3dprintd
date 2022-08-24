@@ -12,7 +12,27 @@ use log::debug;
 pub use motors::Motors;
 use rocket::config::Config as RocketConfig;
 use serde::Deserialize;
-use std::net::{IpAddr, Ipv4Addr};
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    path::PathBuf,
+};
+
+//
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct General {
+    // FIXME force to be absolute
+    pub settings_path: PathBuf,
+}
+
+impl Default for General {
+    fn default() -> Self {
+        Self {
+            settings_path: PathBuf::from("/var/lib/3dprintd/settings.json"),
+        }
+    }
+}
 
 //
 
@@ -54,6 +74,7 @@ impl From<Api> for RocketConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
+    pub general: General,
     #[serde(default)]
     pub api: Api,
     pub motors: Motors,
@@ -68,6 +89,8 @@ pub fn config() -> Result<Config> {
         .merge(Toml::file(&args.cfg))
         .merge(&args)
         .extract()?;
+    // TODO add sanitycheck, e.g. to verify that the motor values aren't higher
+    // than the limits etc.
     debug!("Config is: {:?}", cfg);
     Ok(cfg)
 }
