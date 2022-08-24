@@ -1,13 +1,18 @@
-use crate::{comms::EStop, config::Config};
+use crate::{
+    comms::{EStop, GCode, ManualGCode, MotorControl},
+    settings::Settings,
+};
 use anyhow::{ensure, Result};
-use crossbeam::channel::Receiver;
+use crossbeam::{
+    channel::{Receiver, TryRecvError},
+    select,
+};
 use nanotec_stepper_driver::{
     AllMotor, Driver, Ignore, LimitSwitchBehavior, Motor, MotorStatus, PositioningMode,
     Repetitions, RespondMode, ResponseHandle, RotationDirection, SendAutoStatus,
 };
 use serialport;
 use std::{
-    sync::Arc,
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -58,16 +63,35 @@ struct Motors {
 }
 
 impl Motors {
-    fn reference(&mut self, cfg: &Config) -> Result<()> {
-        todo!("still have to implement persistent settings");
-        // reference_motor(&mut self.x, cfg.motors.x.endstop_direction)?;
-        // reference_motor(&mut self.y, cfg.motors.y.endstop_direction)?;
-        // reference_motor(&mut self.z, cfg.motors.z.endstop_direction)?;
-        // Ok(())
+    fn reference(&mut self, settings: &Settings) -> Result<()> {
+        let cfg = settings.config();
+        reference_motor(
+            &mut self.x,
+            cfg.motors.x.endstop_direction,
+            settings.get_motor_x_reference_speed(),
+            settings.get_motor_x_reference_accel_decel(),
+            settings.get_motor_x_reference_jerk(),
+        )?;
+        reference_motor(
+            &mut self.y,
+            cfg.motors.y.endstop_direction,
+            settings.get_motor_y_reference_speed(),
+            settings.get_motor_y_reference_accel_decel(),
+            settings.get_motor_y_reference_jerk(),
+        )?;
+        reference_motor(
+            &mut self.z,
+            cfg.motors.z.endstop_direction,
+            settings.get_motor_z_reference_speed(),
+            settings.get_motor_z_reference_accel_decel(),
+            settings.get_motor_z_reference_jerk(),
+        )?;
+        Ok(())
     }
 }
 
-fn init(cfg: &Config, mut driver: Driver) -> Result<Motors> {
+fn init(settings: &Settings, mut driver: Driver) -> Result<Motors> {
+    let cfg = settings.config();
     let all = driver.add_all_motor().expect("adding AllMotor failed");
     let x = driver
         .add_motor(cfg.motors.x.address, RespondMode::NotQuiet)
@@ -97,10 +121,7 @@ fn init(cfg: &Config, mut driver: Driver) -> Result<Motors> {
     e.set_accel_ramp_no_conversion(cfg.motors.e.quickstop_ramp)?
         .wait()
         .ignore()?;
-    let mut motors = Motors { all, x, y, z, e };
-    // FIXME maybe take out because this will move motors while there is no way
-    // to actuate the digital estop
-    motors.reference(cfg)?;
+    let motors = Motors { all, x, y, z, e };
     Ok(motors)
 }
 
@@ -123,7 +144,13 @@ fn init(cfg: &Config, mut driver: Driver) -> Result<Motors> {
 //         if msg = new gcode channel -> replace
 //       if on manual channel -> execute
 //       if on gcode channel -> execute
-pub fn start(cfg: Arc<Config>, estop_channel: Receiver<EStop>) -> Result<JoinHandle<()>> {
+pub fn start(
+    settings: Settings,
+    control_channel: Receiver<MotorControl>,
+    manual_gcode_channel: Receiver<ManualGCode>,
+    estop_channel: Receiver<EStop>,
+) -> Result<(JoinHandle<()>, JoinHandle<()>)> {
+    let cfg = settings.config();
     // do onetimesetup first so we can still return and error out if any of that
     // fails
     let iface = serialport::new(cfg.motors.port.as_str(), cfg.motors.baud_rate)
@@ -144,7 +171,60 @@ pub fn start(cfg: Arc<Config>, estop_channel: Receiver<EStop>) -> Result<JoinHan
             }
         }
     });
-    init(cfg.as_ref(), driver)?;
-    let handle = thread::spawn(move || todo!());
-    Ok(handle)
+    init(&settings, driver)?;
+    let handle = thread::spawn(move || {
+        let mut gcode_channel: Option<Receiver<GCode>> = None;
+        loop {
+            match control_channel.try_recv() {
+                Ok(msg) => match msg {
+                    MotorControl::StartPrint(gc) => {
+                        gcode_channel.replace(gc);
+                    }
+                    MotorControl::Exit => break,
+                },
+                Err(e) => match e {
+                    TryRecvError::Empty => (),
+                    TryRecvError::Disconnected => {
+                        // FIXME logging and graceful exit
+                        panic!("motor control channel was unexpectedly closed")
+                    }
+                },
+            }
+            match manual_gcode_channel.try_recv() {
+                Ok(msg) => todo!(),
+                Err(e) => match e {
+                    TryRecvError::Empty => (),
+                    TryRecvError::Disconnected => {
+                        // FIXME logging and graceful exit
+                        panic!("motor control channel was unexpectedly closed")
+                    }
+                },
+            }
+            if let Some(gc) = gcode_channel.as_ref() {
+                match gc.try_recv() {
+                    Ok(msg) => todo!(),
+                    Err(e) => match e {
+                        TryRecvError::Empty => (),
+                        TryRecvError::Disconnected => {
+                            // FIXME logging and graceful exit
+                            panic!("motor control channel was unexpectedly closed")
+                        }
+                    },
+                }
+            }
+            if let Some(gc) = gcode_channel.as_ref() {
+                select! {
+                    recv(control_channel) -> msg => todo!(),
+                    recv(manual_gcode_channel) -> msg => todo!(),
+                    recv(gc) -> msg => todo!(),
+                }
+            } else {
+                select! {
+                    recv(control_channel) -> msg => todo!(),
+                    recv(manual_gcode_channel) -> msg =>  todo!(),
+                }
+            }
+        }
+    });
+    Ok((handle, estop_handle))
 }
