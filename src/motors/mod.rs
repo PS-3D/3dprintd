@@ -1,15 +1,15 @@
+pub mod error;
+
+use self::error::{MotorError, MotorsError};
 use crate::{
-    comms::{EStop, GCode, ManualGCode, MotorControl},
+    comms::{AxisMovement, EStop, ExtruderMovement, MotorControl, Movement},
     settings::Settings,
 };
 use anyhow::{ensure, Result};
-use crossbeam::{
-    channel::{Receiver, TryRecvError},
-    select,
-};
+use crossbeam::channel::{self, Receiver, Sender};
 use nanotec_stepper_driver::{
-    AllMotor, Driver, Ignore, LimitSwitchBehavior, Motor, MotorStatus, PositioningMode,
-    Repetitions, RespondMode, ResponseHandle, RotationDirection, SendAutoStatus,
+    AllMotor, Driver, DriverError, Ignore, LimitSwitchBehavior, Motor, MotorStatus,
+    PositioningMode, Repetitions, RespondMode, ResponseHandle, RotationDirection, SendAutoStatus,
 };
 use serialport;
 use std::{
@@ -17,43 +17,12 @@ use std::{
     time::Duration,
 };
 
-fn reference_motor(
-    motor: &mut Motor<SendAutoStatus>,
-    direction: RotationDirection,
-    speed: u32,
-    accel: u32,
-    jerk: u32,
-) -> Result<()> {
-    motor
-        .set_positioning_mode(PositioningMode::ExternalReference)?
-        .wait()
-        .ignore()?;
-    motor
-        .set_limit_switch_behavior(LimitSwitchBehavior::default())?
-        .wait()
-        .ignore()?;
-    motor.set_rotation_direction(direction)?.wait().ignore()?;
-    motor.set_min_frequency(1)?.wait().ignore()?;
-    motor.set_max_frequency(speed)?.wait().ignore()?;
-    motor
-        .set_rotation_direction_change(false)?
-        .wait()
-        .ignore()?;
-    motor.set_repetitions(Repetitions::N(1))?.wait().ignore()?;
-    motor.set_continuation_record(None)?.wait().ignore()?;
-    motor.set_accel_ramp_no_conversion(accel)?.wait().ignore()?;
-    motor.set_brake_ramp_no_conversion(accel)?.wait().ignore()?;
-    motor.set_max_accel_jerk(jerk)?.wait().ignore()?;
-    motor.set_max_brake_jerk(jerk)?.wait().ignore()?;
-    let status = motor.start_motor()?.wait().ignore()?.wait().ignore()?;
-    ensure!(
-        status == MotorStatus::Ready,
-        "motor error while referencing, status was {}",
-        status
-    );
-    Ok(())
-}
-
+// TODO maybe store state for all motors as in valid or invalid
+// -> set invalid after encountered error,
+// -> set invalid at the beginning
+//
+// => no move allowed when state is invalid, only reference can fix that. if that
+//    fails, keep state invalid
 struct Motors {
     all: AllMotor,
     x: Motor<SendAutoStatus>,
@@ -63,7 +32,43 @@ struct Motors {
 }
 
 impl Motors {
-    fn reference(&mut self, settings: &Settings) -> Result<()> {
+    pub fn reference_all(&mut self, settings: &Settings) -> Result<()> {
+        fn reference_motor(
+            motor: &mut Motor<SendAutoStatus>,
+            direction: RotationDirection,
+            speed: u32,
+            accel: u32,
+            jerk: u32,
+        ) -> Result<()> {
+            motor
+                .set_positioning_mode(PositioningMode::ExternalReference)?
+                .wait()
+                .ignore()?;
+            motor
+                .set_limit_switch_behavior(LimitSwitchBehavior::default())?
+                .wait()
+                .ignore()?;
+            motor.set_rotation_direction(direction)?.wait().ignore()?;
+            motor.set_min_frequency(1)?.wait().ignore()?;
+            motor.set_max_frequency(speed)?.wait().ignore()?;
+            motor
+                .set_rotation_direction_change(false)?
+                .wait()
+                .ignore()?;
+            motor.set_repetitions(Repetitions::N(1))?.wait().ignore()?;
+            motor.set_continuation_record(None)?.wait().ignore()?;
+            motor.set_accel_ramp_no_conversion(accel)?.wait().ignore()?;
+            motor.set_brake_ramp_no_conversion(accel)?.wait().ignore()?;
+            motor.set_max_accel_jerk(jerk)?.wait().ignore()?;
+            motor.set_max_brake_jerk(jerk)?.wait().ignore()?;
+            let status = motor.start_motor()?.wait().ignore()?.wait().ignore()?;
+            ensure!(
+                status == MotorStatus::Ready,
+                "motor error while referencing, status was {}",
+                status
+            );
+            Ok(())
+        }
         let cfg = settings.config();
         reference_motor(
             &mut self.x,
@@ -87,6 +92,130 @@ impl Motors {
             settings.get_motor_z_reference_jerk(),
         )?;
         Ok(())
+    }
+
+    // will only return a DriverError or MotorsError
+    pub fn move_all(&mut self, m: &Movement) -> Result<()> {
+        // set all quiet so setting of values goes faster
+        // we can unwrap here and all following until we set respondmode to notquiet
+        // again because there won't be any response anyways so there can't be
+        // an error
+        self.all
+            .set_respond_mode(RespondMode::Quiet)?
+            .wait()
+            .unwrap();
+
+        fn prepare_move_axis(
+            motor: &mut Motor<SendAutoStatus>,
+            am: &AxisMovement,
+        ) -> Result<(), DriverError> {
+            motor.set_travel_distance(am.distance)?.wait().unwrap();
+            motor.set_min_frequency(am.min_frequency)?.wait().unwrap();
+            motor.set_max_frequency(am.max_frequency)?.wait().unwrap();
+            motor
+                .set_accel_ramp_no_conversion(am.acceleration)?
+                .wait()
+                .unwrap();
+            motor
+                .set_brake_ramp_no_conversion(am.deceleration)?
+                .wait()
+                .unwrap();
+            motor
+                .set_max_accel_jerk(am.acceleration_jerk)?
+                .wait()
+                .unwrap();
+            motor
+                .set_max_brake_jerk(am.deceleration_jerk)?
+                .wait()
+                .unwrap();
+            Ok(())
+        }
+        fn prepare_move_extruder(
+            motor: &mut Motor<SendAutoStatus>,
+            em: &ExtruderMovement,
+        ) -> Result<(), DriverError> {
+            motor.set_rotation_direction(em.direction)?.wait().unwrap();
+            motor
+                .set_travel_distance(em.distance as i32)?
+                .wait()
+                .unwrap();
+            motor.set_min_frequency(em.min_frequency)?.wait().unwrap();
+            motor.set_max_frequency(em.max_frequency)?.wait().unwrap();
+            motor
+                .set_accel_ramp_no_conversion(em.acceleration)?
+                .wait()
+                .unwrap();
+            motor
+                .set_brake_ramp_no_conversion(em.deceleration)?
+                .wait()
+                .unwrap();
+            motor
+                .set_max_accel_jerk(em.acceleration_jerk)?
+                .wait()
+                .unwrap();
+            motor
+                .set_max_brake_jerk(em.deceleration_jerk)?
+                .wait()
+                .unwrap();
+            Ok(())
+        }
+
+        prepare_move_axis(&mut self.x, &m.x)?;
+        prepare_move_axis(&mut self.y, &m.y)?;
+        prepare_move_axis(&mut self.z, &m.z)?;
+        prepare_move_extruder(&mut self.e, &m.e)?;
+
+        // set respondmode to notquiet so we will receive the status once
+        // the motors are finished
+        self.all
+            .set_respond_mode(RespondMode::NotQuiet)?
+            .wait()
+            .ignore()?;
+        let errs: Vec<_> = self
+            .all
+            .start_motor()?
+            .wait()
+            .ignore()?
+            .into_iter()
+            .map(|t| (t.0, t.1.wait().ignore()))
+            // map PositionErrors in status and DriverErrors to MotorError
+            .map(|t| {
+                let res = match t.1 {
+                    Ok(s) => match s {
+                        MotorStatus::PosError => Err(MotorError::PositionError),
+                        _ => Ok(()),
+                    },
+                    Err(e) => Err(MotorError::from(e)),
+                };
+                (t.0, res)
+            })
+            .filter(|t| t.1.is_err())
+            .collect();
+        if errs.is_empty() {
+            Ok(())
+        } else {
+            // invariant of MotorsError will be fulfilled because errs isn't empty
+            let mut me = MotorsError {
+                x: None,
+                y: None,
+                z: None,
+                e: None,
+            };
+            // we can unwrap because we already know that these are the errors
+            for (addr, err) in errs.into_iter().map(|t| (t.0, t.1.unwrap_err())) {
+                // since the returnvalue of all.start_motors is a map of
+                // address -> Result we need to map the address back to the actual
+                // motor again
+                match addr {
+                    x if x == self.x.address() => me.x = Some(err),
+                    y if y == self.y.address() => me.y = Some(err),
+                    z if z == self.z.address() => me.z = Some(err),
+                    e if e == self.e.address() => me.e = Some(err),
+                    _ => unreachable!("Received error from address that doesn't exist in the driver, it should have thrown an error already")
+                }
+            }
+            Err(me.into())
+        }
     }
 }
 
@@ -122,7 +251,23 @@ fn init(settings: &Settings, mut driver: Driver) -> Result<Motors> {
         .wait()
         .ignore()?;
     let motors = Motors { all, x, y, z, e };
+    // FIXME init positioningmode, turningdirection, etc.
     Ok(motors)
+}
+
+fn motor_loop(
+    settings: Settings,
+    mut motors: Motors,
+    control: Receiver<MotorControl>,
+    control_ret: Sender<Result<()>>,
+) {
+    loop {
+        match control.recv().unwrap() {
+            MotorControl::MoveAll(m) => control_ret.send(motors.move_all(&m)),
+            MotorControl::ReferenceAll => control_ret.send(motors.reference_all(&settings)),
+            MotorControl::Exit => return,
+        };
+    }
 }
 
 // create serialport & driver
@@ -147,84 +292,50 @@ fn init(settings: &Settings, mut driver: Driver) -> Result<Motors> {
 pub fn start(
     settings: Settings,
     control_channel: Receiver<MotorControl>,
-    manual_gcode_channel: Receiver<ManualGCode>,
+    control_ret_channel: Sender<Result<()>>,
     estop_channel: Receiver<EStop>,
 ) -> Result<(JoinHandle<()>, JoinHandle<()>)> {
-    let cfg = settings.config();
-    // do onetimesetup first so we can still return and error out if any of that
-    // fails
-    let iface = serialport::new(cfg.motors.port.as_str(), cfg.motors.baud_rate)
-        .timeout(Duration::from_secs(cfg.motors.timeout))
-        .open()?;
-    let driver = Driver::new(iface)?;
-    let mut estop = driver.new_estop();
-    let estop_handle = thread::spawn(move || {
-        loop {
-            match estop_channel
-                .recv()
-                .expect("estop channel was unexpectedly closed")
-            {
-                // if there's an IO error writing, it's probably a good plan to
-                // panic
-                EStop::EStop => estop.estop(2000).unwrap(),
-                EStop::Exit => break,
+    let (setup_send, setup_recv) = channel::bounded(1);
+    // do it this way all in the motorthread because we can't send motor between
+    // threads. We then send the result of the setup via the above channel.
+    // the setup is all in a function so we can use the ? operator for convenience
+    let motor_handle = thread::spawn(move || {
+        fn setup(
+            settings: &Settings,
+            estop_recv: Receiver<EStop>,
+        ) -> Result<(Motors, JoinHandle<()>)> {
+            let cfg = settings.config();
+            let iface = serialport::new(cfg.motors.port.as_str(), cfg.motors.baud_rate)
+                .timeout(Duration::from_secs(cfg.motors.timeout))
+                .open()?;
+            let driver = Driver::new(iface)?;
+            let mut estop = driver.new_estop();
+            let estop_handle = thread::spawn(move || {
+                loop {
+                    match estop_recv
+                        .recv()
+                        .expect("estop channel was unexpectedly closed")
+                    {
+                        // if there's an IO error writing, it's probably a good plan to
+                        // panic
+                        EStop::EStop => estop.estop(2000).unwrap(),
+                        EStop::Exit => break,
+                    }
+                }
+            });
+            let motors = init(&settings, driver)?;
+            Ok((motors, estop_handle))
+        }
+        match setup(&settings, estop_channel) {
+            Ok((motors, estop_handle)) => {
+                setup_send.send(Ok(estop_handle)).unwrap();
+                motor_loop(settings, motors, control_channel, control_ret_channel)
+            }
+            Err(e) => {
+                setup_send.send(Err(e)).unwrap();
             }
         }
     });
-    init(&settings, driver)?;
-    let handle = thread::spawn(move || {
-        let mut gcode_channel: Option<Receiver<GCode>> = None;
-        loop {
-            match control_channel.try_recv() {
-                Ok(msg) => match msg {
-                    MotorControl::StartPrint(gc) => {
-                        gcode_channel.replace(gc);
-                    }
-                    MotorControl::Exit => break,
-                },
-                Err(e) => match e {
-                    TryRecvError::Empty => (),
-                    TryRecvError::Disconnected => {
-                        // FIXME logging and graceful exit
-                        panic!("motor control channel was unexpectedly closed")
-                    }
-                },
-            }
-            match manual_gcode_channel.try_recv() {
-                Ok(msg) => todo!(),
-                Err(e) => match e {
-                    TryRecvError::Empty => (),
-                    TryRecvError::Disconnected => {
-                        // FIXME logging and graceful exit
-                        panic!("motor control channel was unexpectedly closed")
-                    }
-                },
-            }
-            if let Some(gc) = gcode_channel.as_ref() {
-                match gc.try_recv() {
-                    Ok(msg) => todo!(),
-                    Err(e) => match e {
-                        TryRecvError::Empty => (),
-                        TryRecvError::Disconnected => {
-                            // FIXME logging and graceful exit
-                            panic!("motor control channel was unexpectedly closed")
-                        }
-                    },
-                }
-            }
-            if let Some(gc) = gcode_channel.as_ref() {
-                select! {
-                    recv(control_channel) -> msg => todo!(),
-                    recv(manual_gcode_channel) -> msg => todo!(),
-                    recv(gc) -> msg => todo!(),
-                }
-            } else {
-                select! {
-                    recv(control_channel) -> msg => todo!(),
-                    recv(manual_gcode_channel) -> msg =>  todo!(),
-                }
-            }
-        }
-    });
-    Ok((handle, estop_handle))
+    let estop_handle = setup_recv.recv().unwrap()?;
+    Ok((motor_handle, estop_handle))
 }
