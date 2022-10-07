@@ -23,8 +23,8 @@ impl Executor {
             Action::ReferenceAxis(a) => todo!(),
             Action::HotendTemp(t) => todo!(),
             Action::BedTemp(t) => todo!(),
-            Action::WaitHotendTemp => todo!(),
-            Action::WaitBedTemp => todo!(),
+            Action::WaitHotendTemp(t) => todo!(),
+            Action::WaitBedTemp(t) => todo!(),
             Action::Wait(d) => todo!(),
         }
     }

@@ -5,9 +5,9 @@ pub enum Action {
     MoveAll(Movement),
     ReferenceAll,
     ReferenceAxis(Axis),
-    HotendTemp(u32),
-    BedTemp(u32),
-    WaitHotendTemp,
-    WaitBedTemp,
+    HotendTemp(Option<u32>),
+    BedTemp(Option<u32>),
+    WaitHotendTemp(Option<u32>),
+    WaitBedTemp(Option<u32>),
     Wait(Duration),
 }

@@ -512,6 +512,41 @@ impl Decoder {
         Ok(())
     }
 
+    fn m104_140(&mut self, code: GCode) -> Result<Option<u32>> {
+        ensure!(
+            !code.arguments().is_empty(),
+            GCodeError::MissingArguments(code)
+        );
+        let mut temp = None;
+        for arg in code.arguments() {
+            match arg.letter {
+                'S' => {
+                    ensure!(temp.is_none(), GCodeError::DuplicateArgument(*arg, code));
+                    temp = Some(arg.value as u32)
+                }
+                _ => bail!(GCodeError::UnknownArgument(*arg, code)),
+            };
+        }
+        let temp = temp.unwrap();
+        let temp = {
+            if temp == 0 {
+                None
+            } else {
+                Some(temp)
+            }
+        };
+        Ok(temp)
+    }
+
+    /// Executes M104 command
+    ///
+    /// Supported arguments: `S`
+    fn m104(&mut self, code: GCode) -> Result<Action> {
+        assert_code!(code, Miscellaneous, 104, 0);
+        self.hotend_target_temp = self.m104_140(code)?;
+        Ok(Action::HotendTemp(self.hotend_target_temp))
+    }
+
     // Necessary GCode TODO:
     // G28
     //
@@ -528,9 +563,6 @@ impl Decoder {
     // G32
 
     // Necessary MCode TODO:
-    // M104
-    // M106
-    // M107
     // M109
     // M140
     // M190
@@ -578,6 +610,13 @@ impl Decoder {
                 // M84 doesn't really need to do anything either, the motors can't
                 // do that afaik
                 84 => Ok(None),
+                104 => self.m104(code).map(|a| Some(vecdq![a])),
+                // M106 and M107 don't need to do anything because control of
+                // the fan happens automatically because why wouldn't it?
+                // (safer for the machine and all...)
+                106 => Ok(None),
+                // see M106
+                107 => Ok(None),
                 _ => bail!(GCodeError::UnknownCode(code)),
             },
             Mnemonic::ToolChange => match code.major_number() {
