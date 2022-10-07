@@ -78,7 +78,7 @@ impl<'de> Visitor<'de> for RotationDirectionVisitor {
     }
 }
 
-fn deserialize_endstop_direction<'de, D>(deserializer: D) -> Result<RotationDirection, D::Error>
+fn deserialize_rotation_direction<'de, D>(deserializer: D) -> Result<RotationDirection, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -256,6 +256,9 @@ fn default_baud_rate() -> u32 {
 #[derive(Debug, Deserialize)]
 pub struct AxisMotor {
     pub address: u8,
+    // translation of the axis, i.e. mm moved per rotation
+    pub translation: f64,
+    // microsteps per 1.8°
     #[serde(
         default = "StepMode::default",
         deserialize_with = "deserialize_step_size"
@@ -269,6 +272,7 @@ pub struct AxisMotor {
     // limit of the axis in mm
     // limited to 10000 mm, more or less arbitrary
     // chosen in mm rather than steps so steps can be adjusted independently
+    // FIXME convert to f64?
     #[serde(deserialize_with = "deserialize_limit")]
     pub limit: u32,
     #[serde(
@@ -296,7 +300,7 @@ pub struct AxisMotor {
         deserialize_with = "deserialize_jerk"
     )]
     pub decel_jerk_limit: u32,
-    #[serde(deserialize_with = "deserialize_endstop_direction")]
+    #[serde(deserialize_with = "deserialize_rotation_direction")]
     pub endstop_direction: RotationDirection,
     #[serde(default = "default_speed", deserialize_with = "deserialize_speed")]
     pub default_reference_speed: u32,
@@ -312,6 +316,12 @@ pub struct AxisMotor {
 #[derive(Debug, Deserialize)]
 pub struct ExtruderMotor {
     pub address: u8,
+    // turning direction in order to push the filament forward, i.e. positive direction
+    #[serde(deserialize_with = "deserialize_rotation_direction")]
+    pub positive_direction: RotationDirection,
+    // translation of the axis, i.e. mm moved per rotation
+    pub translation: f64,
+    // microsteps per 1.8°
     #[serde(
         default = "StepMode::default",
         deserialize_with = "deserialize_step_size"

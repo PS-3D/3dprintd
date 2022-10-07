@@ -74,6 +74,7 @@ impl From<Api> for RocketConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
+    #[serde(default)]
     pub general: General,
     #[serde(default)]
     pub api: Api,
