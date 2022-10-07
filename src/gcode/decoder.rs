@@ -547,10 +547,13 @@ impl Decoder {
     /// Executes M109 command
     ///
     /// Supported arguments: `S`
-    fn m109(&mut self, code: GCode) -> Result<Action> {
+    fn m109(&mut self, code: GCode) -> Result<VecDeque<Action>> {
         assert_code!(code, Miscellaneous, 109, 0);
-        let temp = extract_temp_from_code(code)?;
-        Ok(Action::WaitHotendTemp(temp))
+        self.hotend_target_temp = extract_temp_from_code(code)?;
+        let mut dq = VecDeque::with_capacity(2);
+        dq.push_back(Action::HotendTemp(self.hotend_target_temp));
+        dq.push_back(Action::WaitHotendTemp(self.hotend_target_temp));
+        Ok(dq)
     }
 
     /// Executes M140 command
@@ -636,7 +639,7 @@ impl Decoder {
                 106 => Ok(None),
                 // see M106
                 107 => Ok(None),
-                109 => self.m109(code).map(|a| Some(vecdq![a])),
+                109 => self.m109(code).map(|dq| Some(dq)),
                 140 => self.m140(code).map(|a| Some(vecdq![a])),
                 190 => self.m190(code).map(|a| Some(vecdq![a])),
                 _ => bail!(GCodeError::UnknownCode(code)),
