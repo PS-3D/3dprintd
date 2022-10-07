@@ -2,7 +2,7 @@ pub mod error;
 
 use self::error::{MotorError, MotorsError};
 use crate::{
-    comms::{AxisMovement, EStop, ExtruderMovement, MotorControl, Movement},
+    comms::{Axis, AxisMovement, EStop, ExtruderMovement, MotorControl, Movement},
     settings::Settings,
 };
 use anyhow::{ensure, Result};
@@ -32,65 +32,81 @@ struct Motors {
 }
 
 impl Motors {
-    pub fn reference_all(&mut self, settings: &Settings) -> Result<()> {
-        fn reference_motor(
-            motor: &mut Motor<SendAutoStatus>,
-            direction: RotationDirection,
-            speed: u32,
-            accel: u32,
-            jerk: u32,
-        ) -> Result<()> {
-            motor
-                .set_positioning_mode(PositioningMode::ExternalReference)?
-                .wait()
-                .ignore()?;
-            motor
-                .set_limit_switch_behavior(LimitSwitchBehavior::default())?
-                .wait()
-                .ignore()?;
-            motor.set_rotation_direction(direction)?.wait().ignore()?;
-            motor.set_min_frequency(1)?.wait().ignore()?;
-            motor.set_max_frequency(speed)?.wait().ignore()?;
-            motor
-                .set_rotation_direction_change(false)?
-                .wait()
-                .ignore()?;
-            motor.set_repetitions(Repetitions::N(1))?.wait().ignore()?;
-            motor.set_continuation_record(None)?.wait().ignore()?;
-            motor.set_accel_ramp_no_conversion(accel)?.wait().ignore()?;
-            motor.set_brake_ramp_no_conversion(accel)?.wait().ignore()?;
-            motor.set_max_accel_jerk(jerk)?.wait().ignore()?;
-            motor.set_max_brake_jerk(jerk)?.wait().ignore()?;
-            let status = motor.start_motor()?.wait().ignore()?.wait().ignore()?;
-            ensure!(
-                status == MotorStatus::Ready,
-                "motor error while referencing, status was {}",
-                status
-            );
-            Ok(())
-        }
-        let cfg = settings.config();
-        reference_motor(
+    fn reference_motor(
+        motor: &mut Motor<SendAutoStatus>,
+        direction: RotationDirection,
+        speed: u32,
+        accel: u32,
+        jerk: u32,
+    ) -> Result<()> {
+        motor
+            .set_positioning_mode(PositioningMode::ExternalReference)?
+            .wait()
+            .ignore()?;
+        motor
+            .set_limit_switch_behavior(LimitSwitchBehavior::default())?
+            .wait()
+            .ignore()?;
+        motor.set_rotation_direction(direction)?.wait().ignore()?;
+        motor.set_min_frequency(1)?.wait().ignore()?;
+        motor.set_max_frequency(speed)?.wait().ignore()?;
+        motor
+            .set_rotation_direction_change(false)?
+            .wait()
+            .ignore()?;
+        motor.set_repetitions(Repetitions::N(1))?.wait().ignore()?;
+        motor.set_continuation_record(None)?.wait().ignore()?;
+        motor.set_accel_ramp_no_conversion(accel)?.wait().ignore()?;
+        motor.set_brake_ramp_no_conversion(accel)?.wait().ignore()?;
+        motor.set_max_accel_jerk(jerk)?.wait().ignore()?;
+        motor.set_max_brake_jerk(jerk)?.wait().ignore()?;
+        let status = motor.start_motor()?.wait().ignore()?.wait().ignore()?;
+        ensure!(
+            status == MotorStatus::Ready,
+            "motor error while referencing, status was {}",
+            status
+        );
+        Ok(())
+    }
+
+    pub fn reference_x(&mut self, settings: &Settings) -> Result<()> {
+        Motors::reference_motor(
             &mut self.x,
-            cfg.motors.x.endstop_direction,
+            settings.config().motors.x.endstop_direction,
             settings.get_motor_x_reference_speed(),
             settings.get_motor_x_reference_accel_decel(),
             settings.get_motor_x_reference_jerk(),
         )?;
-        reference_motor(
+        Ok(())
+    }
+
+    pub fn reference_y(&mut self, settings: &Settings) -> Result<()> {
+        Motors::reference_motor(
             &mut self.y,
-            cfg.motors.y.endstop_direction,
+            settings.config().motors.y.endstop_direction,
             settings.get_motor_y_reference_speed(),
             settings.get_motor_y_reference_accel_decel(),
             settings.get_motor_y_reference_jerk(),
         )?;
-        reference_motor(
+        Ok(())
+    }
+
+    pub fn reference_z(&mut self, settings: &Settings) -> Result<()> {
+        Motors::reference_motor(
             &mut self.z,
-            cfg.motors.z.endstop_direction,
+            settings.config().motors.z.endstop_direction,
             settings.get_motor_z_reference_speed(),
             settings.get_motor_z_reference_accel_decel(),
             settings.get_motor_z_reference_jerk(),
         )?;
+        Ok(())
+    }
+
+    pub fn reference_all(&mut self, settings: &Settings) -> Result<()> {
+        let cfg = settings.config();
+        self.reference_x(settings)?;
+        self.reference_y(settings)?;
+        self.reference_z(settings)?;
         Ok(())
     }
 
@@ -110,53 +126,61 @@ impl Motors {
             am: &AxisMovement,
         ) -> Result<(), DriverError> {
             motor.set_travel_distance(am.distance)?.wait().unwrap();
-            motor.set_min_frequency(am.min_frequency)?.wait().unwrap();
-            motor.set_max_frequency(am.max_frequency)?.wait().unwrap();
-            motor
-                .set_accel_ramp_no_conversion(am.acceleration)?
-                .wait()
-                .unwrap();
-            motor
-                .set_brake_ramp_no_conversion(am.deceleration)?
-                .wait()
-                .unwrap();
-            motor
-                .set_max_accel_jerk(am.acceleration_jerk)?
-                .wait()
-                .unwrap();
-            motor
-                .set_max_brake_jerk(am.deceleration_jerk)?
-                .wait()
-                .unwrap();
+            // if distance is set to 0, ignore setting the other values, it means
+            // the motor won't move anyways
+            if am.distance != 0 {
+                motor.set_min_frequency(am.min_frequency)?.wait().unwrap();
+                motor.set_max_frequency(am.max_frequency)?.wait().unwrap();
+                motor
+                    .set_accel_ramp_no_conversion(am.acceleration)?
+                    .wait()
+                    .unwrap();
+                motor
+                    .set_brake_ramp_no_conversion(am.deceleration)?
+                    .wait()
+                    .unwrap();
+                motor
+                    .set_max_accel_jerk(am.acceleration_jerk)?
+                    .wait()
+                    .unwrap();
+                motor
+                    .set_max_brake_jerk(am.deceleration_jerk)?
+                    .wait()
+                    .unwrap();
+            }
             Ok(())
         }
         fn prepare_move_extruder(
             motor: &mut Motor<SendAutoStatus>,
             em: &ExtruderMovement,
         ) -> Result<(), DriverError> {
-            motor.set_rotation_direction(em.direction)?.wait().unwrap();
             motor
                 .set_travel_distance(em.distance as i32)?
                 .wait()
                 .unwrap();
-            motor.set_min_frequency(em.min_frequency)?.wait().unwrap();
-            motor.set_max_frequency(em.max_frequency)?.wait().unwrap();
-            motor
-                .set_accel_ramp_no_conversion(em.acceleration)?
-                .wait()
-                .unwrap();
-            motor
-                .set_brake_ramp_no_conversion(em.deceleration)?
-                .wait()
-                .unwrap();
-            motor
-                .set_max_accel_jerk(em.acceleration_jerk)?
-                .wait()
-                .unwrap();
-            motor
-                .set_max_brake_jerk(em.deceleration_jerk)?
-                .wait()
-                .unwrap();
+            // if distance is set to 0, ignore setting the other values, it means
+            // the motor won't move anyways
+            if em.distance != 0 {
+                motor.set_rotation_direction(em.direction)?.wait().unwrap();
+                motor.set_min_frequency(em.min_frequency)?.wait().unwrap();
+                motor.set_max_frequency(em.max_frequency)?.wait().unwrap();
+                motor
+                    .set_accel_ramp_no_conversion(em.acceleration)?
+                    .wait()
+                    .unwrap();
+                motor
+                    .set_brake_ramp_no_conversion(em.deceleration)?
+                    .wait()
+                    .unwrap();
+                motor
+                    .set_max_accel_jerk(em.acceleration_jerk)?
+                    .wait()
+                    .unwrap();
+                motor
+                    .set_max_brake_jerk(em.deceleration_jerk)?
+                    .wait()
+                    .unwrap();
+            }
             Ok(())
         }
 
@@ -263,8 +287,17 @@ fn motor_loop(
 ) {
     loop {
         match control.recv().unwrap() {
-            MotorControl::MoveAll(m) => control_ret.send(motors.move_all(&m)),
-            MotorControl::ReferenceAll => control_ret.send(motors.reference_all(&settings)),
+            MotorControl::MoveAll(m) => control_ret.send(motors.move_all(&m)).unwrap(),
+            MotorControl::ReferenceAll => {
+                control_ret.send(motors.reference_all(&settings)).unwrap()
+            }
+            MotorControl::ReferenceAxis(a) => control_ret
+                .send(match a {
+                    Axis::X => motors.reference_x(&settings),
+                    Axis::Y => motors.reference_y(&settings),
+                    Axis::Z => motors.reference_z(&settings),
+                })
+                .unwrap(),
             MotorControl::Exit => return,
         };
     }

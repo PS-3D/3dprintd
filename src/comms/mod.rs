@@ -1,5 +1,13 @@
 use nanotec_stepper_driver::RotationDirection;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+#[derive(Debug, Default)]
 pub struct AxisMovement {
     pub distance: i32,
     pub min_frequency: u32,
@@ -11,6 +19,7 @@ pub struct AxisMovement {
     pub deceleration_jerk: u32,
 }
 
+#[derive(Debug, Default)]
 pub struct ExtruderMovement {
     pub direction: RotationDirection,
     pub distance: u32,
@@ -23,6 +32,8 @@ pub struct ExtruderMovement {
     pub deceleration_jerk: u32,
 }
 
+// set distance to 0 if that axis shouldn't move
+// anything else can be set to random values
 pub struct Movement {
     pub x: AxisMovement,
     pub y: AxisMovement,
@@ -33,6 +44,7 @@ pub struct Movement {
 pub enum MotorControl {
     MoveAll(Movement),
     ReferenceAll,
+    ReferenceAxis(Axis),
     Exit,
 }
 
