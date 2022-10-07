@@ -36,6 +36,29 @@ macro_rules! assert_code {
     };
 }
 
+fn extract_temp_from_code(code: GCode) -> Result<Option<u32>> {
+    ensure!(
+        !code.arguments().is_empty(),
+        GCodeError::MissingArguments(code)
+    );
+    let mut temp = None;
+    for arg in code.arguments() {
+        match arg.letter {
+            'S' => {
+                ensure!(temp.is_none(), GCodeError::DuplicateArgument(*arg, code));
+                temp = Some(arg.value as u32)
+            }
+            _ => bail!(GCodeError::UnknownArgument(*arg, code)),
+        };
+    }
+    let temp = temp.unwrap();
+    if temp == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(temp))
+    }
+}
+
 // TODO state needs:
 // - feedrate
 // - current pos according to program
@@ -512,39 +535,22 @@ impl Decoder {
         Ok(())
     }
 
-    fn m104_140(&mut self, code: GCode) -> Result<Option<u32>> {
-        ensure!(
-            !code.arguments().is_empty(),
-            GCodeError::MissingArguments(code)
-        );
-        let mut temp = None;
-        for arg in code.arguments() {
-            match arg.letter {
-                'S' => {
-                    ensure!(temp.is_none(), GCodeError::DuplicateArgument(*arg, code));
-                    temp = Some(arg.value as u32)
-                }
-                _ => bail!(GCodeError::UnknownArgument(*arg, code)),
-            };
-        }
-        let temp = temp.unwrap();
-        let temp = {
-            if temp == 0 {
-                None
-            } else {
-                Some(temp)
-            }
-        };
-        Ok(temp)
-    }
-
     /// Executes M104 command
     ///
     /// Supported arguments: `S`
     fn m104(&mut self, code: GCode) -> Result<Action> {
         assert_code!(code, Miscellaneous, 104, 0);
-        self.hotend_target_temp = self.m104_140(code)?;
+        self.hotend_target_temp = extract_temp_from_code(code)?;
         Ok(Action::HotendTemp(self.hotend_target_temp))
+    }
+
+    /// Executes M109 command
+    ///
+    /// Supported arguments: `S`
+    fn m109(&mut self, code: GCode) -> Result<Action> {
+        assert_code!(code, Miscellaneous, 109, 0);
+        let temp = extract_temp_from_code(code)?;
+        Ok(Action::WaitHotendTemp(temp))
     }
 
     // Necessary GCode TODO:
@@ -617,6 +623,7 @@ impl Decoder {
                 106 => Ok(None),
                 // see M106
                 107 => Ok(None),
+                109 => self.m109(code).map(|a| Some(vecdq![a])),
                 _ => bail!(GCodeError::UnknownCode(code)),
             },
             Mnemonic::ToolChange => match code.major_number() {
