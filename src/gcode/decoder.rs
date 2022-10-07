@@ -553,6 +553,15 @@ impl Decoder {
         Ok(Action::WaitHotendTemp(temp))
     }
 
+    /// Executes M140 command
+    ///
+    /// Supported arguments: `S`
+    fn m140(&mut self, code: GCode) -> Result<Action> {
+        assert_code!(code, Miscellaneous, 140, 0);
+        self.bed_target_temp = extract_temp_from_code(code)?;
+        Ok(Action::BedTemp(self.bed_target_temp))
+    }
+
     // Necessary GCode TODO:
     // G28
     //
@@ -569,8 +578,6 @@ impl Decoder {
     // G32
 
     // Necessary MCode TODO:
-    // M109
-    // M140
     // M190
     //
     // Optional MCode TODO:
@@ -624,6 +631,7 @@ impl Decoder {
                 // see M106
                 107 => Ok(None),
                 109 => self.m109(code).map(|a| Some(vecdq![a])),
+                140 => self.m140(code).map(|a| Some(vecdq![a])),
                 _ => bail!(GCodeError::UnknownCode(code)),
             },
             Mnemonic::ToolChange => match code.major_number() {
