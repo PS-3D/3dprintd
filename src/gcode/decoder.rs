@@ -562,6 +562,15 @@ impl Decoder {
         Ok(Action::BedTemp(self.bed_target_temp))
     }
 
+    /// Executes M190 command
+    ///
+    /// Supported arguments: `S`
+    fn m190(&mut self, code: GCode) -> Result<Action> {
+        assert_code!(code, Miscellaneous, 190, 0);
+        let temp = extract_temp_from_code(code)?;
+        Ok(Action::WaitBedTemp(temp))
+    }
+
     // Necessary GCode TODO:
     // G28
     //
@@ -577,9 +586,6 @@ impl Decoder {
     // G30
     // G32
 
-    // Necessary MCode TODO:
-    // M190
-    //
     // Optional MCode TODO:
     // M0
     // M1
@@ -632,6 +638,7 @@ impl Decoder {
                 107 => Ok(None),
                 109 => self.m109(code).map(|a| Some(vecdq![a])),
                 140 => self.m140(code).map(|a| Some(vecdq![a])),
+                190 => self.m190(code).map(|a| Some(vecdq![a])),
                 _ => bail!(GCodeError::UnknownCode(code)),
             },
             Mnemonic::ToolChange => match code.major_number() {
