@@ -1,6 +1,5 @@
-use std::fs::File;
-
 use nanotec_stepper_driver::RotationDirection;
+use std::{fs::File, time::Duration};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Axis {
@@ -54,6 +53,18 @@ pub enum MotorControl {
     ReferenceAll,
     ReferenceAxis(Axis),
     Exit,
+}
+
+#[derive(Debug)]
+pub enum Action {
+    MoveAll(Movement),
+    ReferenceAll,
+    ReferenceAxis(Axis),
+    HotendTemp(Option<u32>),
+    BedTemp(Option<u32>),
+    WaitHotendTemp(Option<u32>),
+    WaitBedTemp(Option<u32>),
+    Wait(Duration),
 }
 
 pub enum DecoderComms {

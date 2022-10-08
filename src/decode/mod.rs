@@ -1,29 +1,21 @@
-pub(self) mod action;
 mod decoder;
 pub mod error;
-mod executor;
 
-use self::{action::Action, decoder::Decoder, executor::Executor};
+use self::decoder::Decoder;
 use crate::{
-    comms::{ControlComms, DecoderComms, MotorControl},
+    comms::{Action, ControlComms, DecoderComms},
     settings::Settings,
 };
 use anyhow::Result;
 use crossbeam::{
-    channel::{self, Receiver, Sender},
+    channel::{Receiver, Sender},
     select,
 };
-use gcode::GCode;
 use std::{
     collections::VecDeque,
     io::Read,
     thread::{self, JoinHandle},
 };
-
-// NOTE maybe decode gcode into actions, which then can be buffered
-// actions could have a format that is easily understood. that way the
-// "lengthy" parsing can be sourced out ("parsing" could also then include already
-// calculating things etc. so actions only need to be executed)
 
 // FIXME make buffer only parts of the gcode from the file so we don't need
 // to store all of it in memory and can print arbitrarily large files
@@ -173,30 +165,11 @@ fn decoder_loop(
     }
 }
 
-fn executor_loop(
-    action_recv: Receiver<ControlComms<Action>>,
-    motor_send: Sender<MotorControl>,
-    motor_ret_recv: Receiver<Result<()>>,
-) {
-    let mut exec = Executor::new(motor_send, motor_ret_recv);
-    loop {
-        match action_recv.recv().unwrap() {
-            // FIXME do something with result
-            ControlComms::Msg(a) => exec.exec(a).unwrap(),
-            ControlComms::Exit => break,
-        }
-    }
-}
-
 pub fn start(
     settings: Settings,
     decoder_recv: Receiver<ControlComms<DecoderComms>>,
-    motor_send: Sender<MotorControl>,
-    motor_ret_recv: Receiver<Result<()>>,
-) -> (JoinHandle<()>, JoinHandle<()>) {
-    let (executor_send, executor_recv) = channel::bounded(16);
-    let executor_handle =
-        thread::spawn(move || executor_loop(executor_recv, motor_send, motor_ret_recv));
-    let decoder_handle = thread::spawn(move || decoder_loop(settings, decoder_recv, executor_send));
-    (decoder_handle, executor_handle)
+    executor_send: Sender<ControlComms<Action>>,
+) -> JoinHandle<()> {
+    let handle = thread::spawn(move || decoder_loop(settings, decoder_recv, executor_send));
+    handle
 }

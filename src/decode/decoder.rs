@@ -1,6 +1,6 @@
-use super::{action::Action, error::GCodeError};
+use super::error::GCodeError;
 use crate::{
-    comms::{Axis, AxisMovement, ExtruderMovement, Movement},
+    comms::{Action, Axis, AxisMovement, ExtruderMovement, Movement},
     settings::Settings,
 };
 use anyhow::{bail, ensure, Result};

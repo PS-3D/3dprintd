@@ -1,9 +1,7 @@
-use std::{thread, time::Duration};
-
-use super::action::Action;
-use crate::comms::MotorControl;
+use crate::comms::{Action, MotorControl};
 use anyhow::Result;
 use crossbeam::channel::{Receiver, Sender};
+use std::{thread, time::Duration};
 
 pub struct Executor {
     motor_send: Sender<MotorControl>,
