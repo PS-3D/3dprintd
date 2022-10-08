@@ -3,7 +3,7 @@ mod motors;
 
 use self::{executor::Executor, motors::Motors};
 use crate::{
-    comms::{Action, ControlComms, EStop},
+    comms::{Action, ControlComms, EStopComms},
     settings::Settings,
 };
 use anyhow::Result;
@@ -32,7 +32,7 @@ fn executor_loop(
 pub fn start(
     settings: Settings,
     executor_recv: Receiver<ControlComms<Action>>,
-    estop_recv: Receiver<EStop>,
+    estop_recv: Receiver<ControlComms<EStopComms>>,
 ) -> Result<(JoinHandle<()>, JoinHandle<()>)> {
     let (setup_send, setup_recv) = channel::bounded(1);
     // do it this way all in the executorhread because we can't send motors between
@@ -41,7 +41,7 @@ pub fn start(
     let executor_handle = thread::spawn(move || {
         fn setup(
             settings: &Settings,
-            estop_recv: Receiver<EStop>,
+            estop_recv: Receiver<ControlComms<EStopComms>>,
         ) -> Result<(Motors, JoinHandle<()>)> {
             let cfg = settings.config();
             let iface = serialport::new(cfg.motors.port.as_str(), cfg.motors.baud_rate)
@@ -57,8 +57,10 @@ pub fn start(
                     {
                         // if there's an IO error writing, it's probably a good plan to
                         // panic
-                        EStop::EStop => estop.estop(2000).unwrap(),
-                        EStop::Exit => break,
+                        ControlComms::Msg(m) => match m {
+                            EStopComms::EStop => estop.estop(2000).unwrap(),
+                        },
+                        ControlComms::Exit => break,
                     }
                 }
             });

@@ -68,7 +68,6 @@ pub enum DecoderComms {
     Pause,
 }
 
-pub enum EStop {
+pub enum EStopComms {
     EStop,
-    Exit,
 }
