@@ -38,7 +38,7 @@ pub fn launch(
                     gcode::post_stop,
                     gcode::post_continue,
                     gcode::post_pause,
-                    axis::get,
+                    axis::get_position,
                     axis::get_axis_name_position,
                     axis::get_axis_name_settings,
                     axis::get_e_settings,

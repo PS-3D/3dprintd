@@ -2,7 +2,7 @@ use crate::comms::Axis;
 use rocket::{get, http::Status, post, put, response::status};
 
 #[get("/axis/position")]
-pub fn get() -> status::Custom<&'static str> {
+pub fn get_position() -> status::Custom<&'static str> {
     status::Custom(Status::NotImplemented, "unimplemented")
 }
 
