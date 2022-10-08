@@ -10,7 +10,7 @@ use figment::{
 };
 use log::debug;
 pub use motors::Motors;
-use rocket::config::Config as RocketConfig;
+use rocket::config::{Config as RocketConfig, Ident};
 use serde::Deserialize;
 use std::{
     net::{IpAddr, Ipv4Addr},
@@ -60,6 +60,7 @@ impl From<&Api> for RocketConfig {
         cfg.address = api.address;
         cfg.port = api.port;
         cfg.workers = api.workers;
+        cfg.ident = Ident::try_new("3dprintd").unwrap();
         cfg
     }
 }
