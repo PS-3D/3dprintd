@@ -1,6 +1,7 @@
 use crate::comms::{Axis, Movement};
 use std::time::Duration;
 
+#[derive(Debug)]
 pub enum Action {
     MoveAll(Movement),
     ReferenceAll,
