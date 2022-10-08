@@ -8,13 +8,14 @@ use crate::{
 };
 use anyhow::Result;
 use crossbeam::channel::Sender;
-use rocket::{config::Config as RocketConfig, post, routes, State};
+use rocket::{config::Config as RocketConfig, post, response::status, routes, State};
 
 #[post("/estop")]
-fn post_estop(estop_send: &State<Sender<ControlComms<EStopComms>>>) {
+fn post_estop(estop_send: &State<Sender<ControlComms<EStopComms>>>) -> status::Accepted<()> {
     estop_send
         .send(ControlComms::Msg(EStopComms::EStop))
         .unwrap();
+    status::Accepted(None)
 }
 
 pub fn launch(
