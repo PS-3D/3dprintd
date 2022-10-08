@@ -43,15 +43,9 @@ pub struct Movement {
     pub e: ExtruderMovement,
 }
 
+#[derive(Debug)]
 pub enum ControlComms<T> {
     Msg(T),
-    Exit,
-}
-
-pub enum MotorControl {
-    MoveAll(Movement),
-    ReferenceAll,
-    ReferenceAxis(Axis),
     Exit,
 }
 

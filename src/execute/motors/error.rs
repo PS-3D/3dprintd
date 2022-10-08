@@ -1,6 +1,5 @@
-use std::fmt::Display;
-
 use nanotec_stepper_driver::DriverError;
+use std::fmt::Display;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

@@ -2,19 +2,13 @@ pub mod error;
 
 use self::error::{MotorError, MotorsError};
 use crate::{
-    comms::{Axis, AxisMovement, EStop, ExtruderMovement, MotorControl, Movement},
+    comms::{AxisMovement, ExtruderMovement, Movement},
     settings::Settings,
 };
 use anyhow::{ensure, Result};
-use crossbeam::channel::{self, Receiver, Sender};
 use nanotec_stepper_driver::{
     AllMotor, Driver, DriverError, Ignore, LimitSwitchBehavior, Motor, MotorStatus,
     PositioningMode, Repetitions, RespondMode, ResponseHandle, RotationDirection, SendAutoStatus,
-};
-use serialport;
-use std::{
-    thread::{self, JoinHandle},
-    time::Duration,
 };
 
 // TODO maybe store state for all motors as in valid or invalid
@@ -23,7 +17,7 @@ use std::{
 //
 // => no move allowed when state is invalid, only reference can fix that. if that
 //    fails, keep state invalid
-struct Motors {
+pub struct Motors {
     all: AllMotor,
     x: Motor<SendAutoStatus>,
     y: Motor<SendAutoStatus>,
@@ -32,6 +26,42 @@ struct Motors {
 }
 
 impl Motors {
+    pub fn init(settings: &Settings, mut driver: Driver) -> Result<Self> {
+        let cfg = settings.config();
+        let all = driver.add_all_motor().expect("adding AllMotor failed");
+        let x = driver
+            .add_motor(cfg.motors.x.address, RespondMode::NotQuiet)
+            .expect("adding x axis motor failed");
+        let y = driver
+            .add_motor(cfg.motors.y.address, RespondMode::NotQuiet)
+            .expect("adding y axis motor failed");
+        let z = driver
+            .add_motor(cfg.motors.z.address, RespondMode::NotQuiet)
+            .expect("adding z axis motor failed");
+        let e = driver
+            .add_motor(cfg.motors.e.address, RespondMode::NotQuiet)
+            .expect("adding e axis motor failed");
+        let mut x = x.start_sending_auto_status().ignore()?.wait().ignore()?;
+        let mut y = y.start_sending_auto_status().ignore()?.wait().ignore()?;
+        let mut z = z.start_sending_auto_status().ignore()?.wait().ignore()?;
+        let mut e = e.start_sending_auto_status().ignore()?.wait().ignore()?;
+        x.set_quickstop_ramp_no_conversion(cfg.motors.x.quickstop_ramp)?
+            .wait()
+            .ignore()?;
+        y.set_quickstop_ramp_no_conversion(cfg.motors.y.quickstop_ramp)?
+            .wait()
+            .ignore()?;
+        z.set_accel_ramp_no_conversion(cfg.motors.z.quickstop_ramp)?
+            .wait()
+            .ignore()?;
+        e.set_accel_ramp_no_conversion(cfg.motors.e.quickstop_ramp)?
+            .wait()
+            .ignore()?;
+        let motors = Motors { all, x, y, z, e };
+        // FIXME init positioningmode, turningdirection, etc.
+        Ok(motors)
+    }
+
     fn reference_motor(
         motor: &mut Motor<SendAutoStatus>,
         direction: RotationDirection,
@@ -103,7 +133,6 @@ impl Motors {
     }
 
     pub fn reference_all(&mut self, settings: &Settings) -> Result<()> {
-        let cfg = settings.config();
         self.reference_x(settings)?;
         self.reference_y(settings)?;
         self.reference_z(settings)?;
@@ -241,134 +270,4 @@ impl Motors {
             Err(me.into())
         }
     }
-}
-
-fn init(settings: &Settings, mut driver: Driver) -> Result<Motors> {
-    let cfg = settings.config();
-    let all = driver.add_all_motor().expect("adding AllMotor failed");
-    let x = driver
-        .add_motor(cfg.motors.x.address, RespondMode::NotQuiet)
-        .expect("adding x axis motor failed");
-    let y = driver
-        .add_motor(cfg.motors.y.address, RespondMode::NotQuiet)
-        .expect("adding y axis motor failed");
-    let z = driver
-        .add_motor(cfg.motors.z.address, RespondMode::NotQuiet)
-        .expect("adding z axis motor failed");
-    let e = driver
-        .add_motor(cfg.motors.e.address, RespondMode::NotQuiet)
-        .expect("adding e axis motor failed");
-    let mut x = x.start_sending_auto_status().ignore()?.wait().ignore()?;
-    let mut y = y.start_sending_auto_status().ignore()?.wait().ignore()?;
-    let mut z = z.start_sending_auto_status().ignore()?.wait().ignore()?;
-    let mut e = e.start_sending_auto_status().ignore()?.wait().ignore()?;
-    x.set_quickstop_ramp_no_conversion(cfg.motors.x.quickstop_ramp)?
-        .wait()
-        .ignore()?;
-    y.set_quickstop_ramp_no_conversion(cfg.motors.y.quickstop_ramp)?
-        .wait()
-        .ignore()?;
-    z.set_accel_ramp_no_conversion(cfg.motors.z.quickstop_ramp)?
-        .wait()
-        .ignore()?;
-    e.set_accel_ramp_no_conversion(cfg.motors.e.quickstop_ramp)?
-        .wait()
-        .ignore()?;
-    let motors = Motors { all, x, y, z, e };
-    // FIXME init positioningmode, turningdirection, etc.
-    Ok(motors)
-}
-
-fn motor_loop(
-    settings: Settings,
-    mut motors: Motors,
-    control: Receiver<MotorControl>,
-    control_ret: Sender<Result<()>>,
-) {
-    loop {
-        match control.recv().unwrap() {
-            MotorControl::MoveAll(m) => control_ret.send(motors.move_all(&m)).unwrap(),
-            MotorControl::ReferenceAll => {
-                control_ret.send(motors.reference_all(&settings)).unwrap()
-            }
-            MotorControl::ReferenceAxis(a) => control_ret
-                .send(match a {
-                    Axis::X => motors.reference_x(&settings),
-                    Axis::Y => motors.reference_y(&settings),
-                    Axis::Z => motors.reference_z(&settings),
-                })
-                .unwrap(),
-            MotorControl::Exit => return,
-        };
-    }
-}
-
-// create serialport & driver
-//
-// get estop & spawn estop listener thread
-//
-// init:
-//   setup quickstop ramp
-//   reference axis
-//
-// spawn motor thread:
-//   loop
-//     check for msg on control channel -> exec that
-//     check for msg on manual channel -> exec that
-//     check for msg on gcode channel -> exec that
-//     if none, select for message on channel
-//       if on control channel -> exec that
-//         if msg = exit -> break
-//         if msg = new gcode channel -> replace
-//       if on manual channel -> execute
-//       if on gcode channel -> execute
-pub fn start(
-    settings: Settings,
-    control_channel: Receiver<MotorControl>,
-    control_ret_channel: Sender<Result<()>>,
-    estop_channel: Receiver<EStop>,
-) -> Result<(JoinHandle<()>, JoinHandle<()>)> {
-    let (setup_send, setup_recv) = channel::bounded(1);
-    // do it this way all in the motorthread because we can't send motor between
-    // threads. We then send the result of the setup via the above channel.
-    // the setup is all in a function so we can use the ? operator for convenience
-    let motor_handle = thread::spawn(move || {
-        fn setup(
-            settings: &Settings,
-            estop_recv: Receiver<EStop>,
-        ) -> Result<(Motors, JoinHandle<()>)> {
-            let cfg = settings.config();
-            let iface = serialport::new(cfg.motors.port.as_str(), cfg.motors.baud_rate)
-                .timeout(Duration::from_secs(cfg.motors.timeout))
-                .open()?;
-            let driver = Driver::new(iface)?;
-            let mut estop = driver.new_estop();
-            let estop_handle = thread::spawn(move || {
-                loop {
-                    match estop_recv
-                        .recv()
-                        .expect("estop channel was unexpectedly closed")
-                    {
-                        // if there's an IO error writing, it's probably a good plan to
-                        // panic
-                        EStop::EStop => estop.estop(2000).unwrap(),
-                        EStop::Exit => break,
-                    }
-                }
-            });
-            let motors = init(&settings, driver)?;
-            Ok((motors, estop_handle))
-        }
-        match setup(&settings, estop_channel) {
-            Ok((motors, estop_handle)) => {
-                setup_send.send(Ok(estop_handle)).unwrap();
-                motor_loop(settings, motors, control_channel, control_ret_channel)
-            }
-            Err(e) => {
-                setup_send.send(Err(e)).unwrap();
-            }
-        }
-    });
-    let estop_handle = setup_recv.recv().unwrap()?;
-    Ok((motor_handle, estop_handle))
 }
