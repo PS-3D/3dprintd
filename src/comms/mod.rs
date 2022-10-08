@@ -1,4 +1,5 @@
 use nanotec_stepper_driver::RotationDirection;
+use rocket::request::FromParam;
 use std::{fs::File, time::Duration};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -6,6 +7,19 @@ pub enum Axis {
     X,
     Y,
     Z,
+}
+
+impl FromParam<'_> for Axis {
+    type Error = &'static str;
+
+    fn from_param(param: &str) -> Result<Self, Self::Error> {
+        match param {
+            "x" => Ok(Self::X),
+            "y" => Ok(Self::Y),
+            "z" => Ok(Self::Z),
+            _ => Err("not a valid axis, must be X, Y or Z"),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
