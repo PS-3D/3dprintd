@@ -1,4 +1,5 @@
 mod axis;
+mod error;
 mod gcode;
 mod heating;
 
@@ -51,6 +52,9 @@ pub fn launch(
                     heating::put_hotend_settings,
                     heating::put_bed_settings,
                     heating::put_chamber_settings,
+                    error::get,
+                    error::get_last,
+                    error::get_id,
                 ],
             )
             .launch(),
