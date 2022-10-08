@@ -1,30 +1,34 @@
 mod config;
 
 pub use self::config::Config;
-use anyhow::Result;
+use anyhow::{Context, Error, Result};
+use log::warn;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::{
     fs::File,
-    io::Write,
+    io::{self, Read, Write},
     sync::{Arc, RwLock},
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 struct AxisMotorSettings {
     reference_speed: Option<u32>,
     reference_accel_decel: Option<u32>,
     reference_jerk: Option<u32>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 struct MotorSettings {
     x: AxisMotorSettings,
     y: AxisMotorSettings,
     z: AxisMotorSettings,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 struct InnerSettings {
     motors: MotorSettings,
 }
@@ -43,8 +47,40 @@ macro_rules! get_option {
 
 impl Settings {
     fn new(cfg: Config) -> Result<Self> {
-        let file = File::open(&cfg.general.settings_path)?;
-        let inner: InnerSettings = serde_json::from_reader(file)?;
+        // if the file doesn't exist, we don't want to error out, we can just
+        // use the default values
+        let file = match File::open(&cfg.general.settings_path) {
+            Ok(f) => Some(f),
+            Err(e) => {
+                if e.kind() == io::ErrorKind::NotFound {
+                    None
+                } else {
+                    // TODO check if it might work better with tracing/log
+                    return Err(Error::from(e)).context("Failed to open settings-file");
+                }
+            }
+        };
+        let inner: InnerSettings = {
+            if let Some(mut f) = file {
+                // if file did exist, it still might be empty, in which case
+                // we also need to use default values, serde_jsone doesn't do that
+                //
+                // size chosen more or less arbitrarily, should fit any settings
+                // file and isn't too big
+                let mut contents = String::with_capacity(512);
+                f.read_to_string(&mut contents)?;
+                if !contents.trim().is_empty() {
+                    serde_json::from_str(&contents)?
+                } else {
+                    warn!("settings-file is empty");
+                    Default::default()
+                }
+            } else {
+                warn!("there was no settings-file found at the given location");
+                // if file didn't exist, use default vaules
+                Default::default()
+            }
+        };
         Ok(Self {
             config: Arc::new(cfg),
             settings: Arc::new(RwLock::new(inner)),
