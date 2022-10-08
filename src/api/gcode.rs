@@ -1,4 +1,6 @@
-use rocket::{get, http::Status, post, response::status};
+use crate::comms::{ControlComms, DecoderComms};
+use crossbeam::channel::Sender;
+use rocket::{get, http::Status, post, response::status, State};
 
 #[get("/gcode")]
 pub fn get() -> status::Custom<&'static str> {
@@ -11,8 +13,11 @@ pub fn post_start() -> status::Custom<&'static str> {
 }
 
 #[post("/gcode/stop")]
-pub fn post_stop() -> status::Custom<&'static str> {
-    status::Custom(Status::NotImplemented, "unimplemented")
+pub fn post_stop(decoder_send: &State<Sender<ControlComms<DecoderComms>>>) -> status::Accepted<()> {
+    decoder_send
+        .send(ControlComms::Msg(DecoderComms::Stop))
+        .unwrap();
+    status::Accepted(None)
 }
 
 #[post("/gcode/continue")]
