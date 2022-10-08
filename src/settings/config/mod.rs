@@ -75,7 +75,7 @@ impl From<Api> for RocketConfig {
 #[derive(Debug, Deserialize)]
 pub struct Hotend {
     // temp limit in Celsius
-    limit: u32,
+    pub limit: u32,
 }
 
 //
@@ -83,7 +83,7 @@ pub struct Hotend {
 #[derive(Debug, Deserialize)]
 pub struct Bed {
     // temp limit in Celsius
-    limit: u32,
+    pub limit: u32,
 }
 
 //

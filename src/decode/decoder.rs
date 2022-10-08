@@ -36,7 +36,7 @@ macro_rules! assert_code {
     };
 }
 
-fn extract_temp_from_code(code: GCode) -> Result<Option<u32>> {
+fn extract_temp_from_code(code: GCode, limit: u32) -> Result<Option<u32>> {
     ensure!(
         !code.arguments().is_empty(),
         GCodeError::MissingArguments(code)
@@ -52,6 +52,7 @@ fn extract_temp_from_code(code: GCode) -> Result<Option<u32>> {
         };
     }
     let temp = temp.unwrap();
+    ensure!(temp <= limit, GCodeError::OutOfBounds(code));
     if temp == 0 {
         Ok(None)
     } else {
@@ -540,7 +541,8 @@ impl Decoder {
     /// Supported arguments: `S`
     fn m104(&mut self, code: GCode) -> Result<Action> {
         assert_code!(code, Miscellaneous, 104, 0);
-        self.hotend_target_temp = extract_temp_from_code(code)?;
+        self.hotend_target_temp =
+            extract_temp_from_code(code, self.settings.config().hotend.limit)?;
         Ok(Action::HotendTemp(self.hotend_target_temp))
     }
 
@@ -549,7 +551,8 @@ impl Decoder {
     /// Supported arguments: `S`
     fn m109(&mut self, code: GCode) -> Result<VecDeque<Action>> {
         assert_code!(code, Miscellaneous, 109, 0);
-        self.hotend_target_temp = extract_temp_from_code(code)?;
+        self.hotend_target_temp =
+            extract_temp_from_code(code, self.settings.config().hotend.limit)?;
         let mut dq = VecDeque::with_capacity(2);
         dq.push_back(Action::HotendTemp(self.hotend_target_temp));
         dq.push_back(Action::WaitHotendTemp(self.hotend_target_temp));
@@ -561,7 +564,7 @@ impl Decoder {
     /// Supported arguments: `S`
     fn m140(&mut self, code: GCode) -> Result<Action> {
         assert_code!(code, Miscellaneous, 140, 0);
-        self.bed_target_temp = extract_temp_from_code(code)?;
+        self.bed_target_temp = extract_temp_from_code(code, self.settings.config().bed.limit)?;
         Ok(Action::BedTemp(self.bed_target_temp))
     }
 
@@ -570,7 +573,7 @@ impl Decoder {
     /// Supported arguments: `S`
     fn m190(&mut self, code: GCode) -> Result<Action> {
         assert_code!(code, Miscellaneous, 190, 0);
-        let temp = extract_temp_from_code(code)?;
+        let temp = extract_temp_from_code(code, self.settings.config().bed.limit)?;
         Ok(Action::WaitBedTemp(temp))
     }
 
