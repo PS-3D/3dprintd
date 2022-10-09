@@ -244,7 +244,7 @@ fn default_accel_decel() -> u32 {
 }
 
 fn default_jerk() -> u32 {
-    1
+    100_000
 }
 
 fn default_baud_rate() -> u32 {
