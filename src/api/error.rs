@@ -1,7 +1,8 @@
 use rocket::{get, http::Status, response::status};
 
-#[get("/errors")]
-pub fn get() -> status::Custom<&'static str> {
+#[get("/errors?<page>")]
+pub fn get(page: Option<usize>) -> status::Custom<&'static str> {
+    let page = page.unwrap_or(0);
     status::Custom(Status::NotImplemented, "unimplemented")
 }
 
