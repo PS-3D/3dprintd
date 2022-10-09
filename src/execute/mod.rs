@@ -5,9 +5,10 @@ use self::{executor::Executor, motors::Motors};
 use crate::{
     comms::{Action, ControlComms, EStopComms},
     settings::Settings,
+    util::send_err,
 };
-use anyhow::Result;
-use crossbeam::channel::{self, Receiver};
+use anyhow::{Error, Result};
+use crossbeam::channel::{self, Receiver, Sender};
 use nanotec_stepper_driver::Driver;
 use std::{
     thread::{self, JoinHandle},
@@ -18,12 +19,12 @@ fn executor_loop(
     settings: Settings,
     motors: Motors,
     executor_recv: Receiver<ControlComms<Action>>,
+    error_send: Sender<ControlComms<Error>>,
 ) {
     let mut exec = Executor::new(settings, motors);
     loop {
         match executor_recv.recv().unwrap() {
-            // FIXME do something with result
-            ControlComms::Msg(a) => exec.exec(a).unwrap(),
+            ControlComms::Msg(a) => send_err!(exec.exec(a), error_send),
             ControlComms::Exit => break,
         }
     }
@@ -33,6 +34,7 @@ pub fn start(
     settings: Settings,
     executor_recv: Receiver<ControlComms<Action>>,
     estop_recv: Receiver<ControlComms<EStopComms>>,
+    error_send: Sender<ControlComms<Error>>,
 ) -> Result<(JoinHandle<()>, JoinHandle<()>)> {
     let (setup_send, setup_recv) = channel::bounded(1);
     // do it this way all in the executorhread because we can't send motors between
@@ -70,7 +72,7 @@ pub fn start(
         match setup(&settings, estop_recv) {
             Ok((motors, estop_handle)) => {
                 setup_send.send(Ok(estop_handle)).unwrap();
-                executor_loop(settings, motors, executor_recv);
+                executor_loop(settings, motors, executor_recv, error_send);
             }
             Err(e) => {
                 setup_send.send(Err(e)).unwrap();

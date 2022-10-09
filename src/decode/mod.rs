@@ -5,8 +5,9 @@ use self::decoder::Decoder;
 use crate::{
     comms::{Action, ControlComms, DecoderComms},
     settings::Settings,
+    util::send_err,
 };
-use anyhow::Result;
+use anyhow::{Error, Result};
 use crossbeam::{
     channel::{Receiver, Sender},
     select,
@@ -143,22 +144,21 @@ fn decoder_loop(
     settings: Settings,
     decoder_recv: Receiver<ControlComms<DecoderComms>>,
     executor_send: Sender<ControlComms<Action>>,
+    error_send: Sender<ControlComms<Error>>,
 ) {
     let mut data = DecoderThread::new(Decoder::new(settings));
     loop {
         if data.state.is_printing() {
             select! {
                 recv(decoder_recv) -> msg => match msg.unwrap() {
-                    // FIXME do smth with result
-                    ControlComms::Msg(m) => data.handle_msg(m).unwrap(),
+                    ControlComms::Msg(m) => send_err!(data.handle_msg(m), error_send),
                     ControlComms::Exit => break,
                 },
                 send(executor_send, ControlComms::Msg(data.next())) -> res => res.unwrap()
             }
         } else {
             match decoder_recv.recv().unwrap() {
-                // FIXME do smth with result
-                ControlComms::Msg(m) => data.handle_msg(m).unwrap(),
+                ControlComms::Msg(m) => send_err!(data.handle_msg(m), error_send),
                 ControlComms::Exit => break,
             }
         }
@@ -169,7 +169,9 @@ pub fn start(
     settings: Settings,
     decoder_recv: Receiver<ControlComms<DecoderComms>>,
     executor_send: Sender<ControlComms<Action>>,
+    error_send: Sender<ControlComms<Error>>,
 ) -> JoinHandle<()> {
-    let handle = thread::spawn(move || decoder_loop(settings, decoder_recv, executor_send));
+    let handle =
+        thread::spawn(move || decoder_loop(settings, decoder_recv, executor_send, error_send));
     handle
 }
