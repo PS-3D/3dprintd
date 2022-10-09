@@ -12,10 +12,10 @@ path = "src/main.rs"
 [dependencies]
 # chose 5 instead of 4 even tho 5 isn't out yet due to 5 having an option
 # to shutdown rocket properly and not just killing the process
-rocket = "0.5.0-rc.2"
+rocket = { version = "0.5.0-rc.2", features = ["json"] }
 gcode = "0.6.1"
-figment = { version = "0.10.6", features = ["toml"]}
-serde = { version = "1.0.139", features = ["derive"]}
+figment = { version = "0.10.6", features = ["toml"] }
+serde = { version = "1.0.139", features = ["derive"] }
 serde_json = "1.0.85"
 serialport = "4.2.0"
 crossbeam = "0.8.1"

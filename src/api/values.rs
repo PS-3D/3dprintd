@@ -1,3 +1,4 @@
+use crate::comms::ControlComms;
 use anyhow::Error;
 use crossbeam::channel::Receiver;
 use indexmap::IndexMap;
@@ -94,11 +95,14 @@ impl Errors {
     }
 }
 
-pub fn start(error_recv: Receiver<Error>) -> (JoinHandle<()>, Errors) {
+pub fn start(error_recv: Receiver<ControlComms<Error>>) -> (JoinHandle<()>, Errors) {
     let errors = Errors::new();
     let errors_clone = errors.clone();
     let handle = thread::spawn(move || loop {
-        errors.insert(error_recv.recv().unwrap());
+        match error_recv.recv().unwrap() {
+            ControlComms::Msg(e) => errors.insert(e),
+            ControlComms::Exit => break,
+        }
     });
     (handle, errors_clone)
 }

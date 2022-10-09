@@ -1,7 +1,5 @@
-mod axis;
+mod endpoints;
 mod error;
-mod gcode;
-mod heating;
 pub mod values;
 
 use self::values::Errors;
@@ -11,15 +9,7 @@ use crate::{
 };
 use anyhow::Result;
 use crossbeam::channel::Sender;
-use rocket::{config::Config as RocketConfig, post, response::status, routes, State};
-
-#[post("/estop")]
-fn post_estop(estop_send: &State<Sender<ControlComms<EStopComms>>>) -> status::Accepted<()> {
-    estop_send
-        .send(ControlComms::Msg(EStopComms::EStop))
-        .unwrap();
-    status::Accepted(None)
-}
+use rocket::{config::Config as RocketConfig, routes};
 
 pub fn launch(
     settings: Settings,
@@ -27,6 +17,33 @@ pub fn launch(
     decoder_send: Sender<ControlComms<DecoderComms>>,
     estop_send: Sender<ControlComms<EStopComms>>,
 ) -> Result<()> {
+    let routes_v0 = {
+        use self::endpoints::*;
+        routes![
+            post_estop,
+            gcode::get,
+            gcode::post_start,
+            gcode::post_stop,
+            gcode::post_continue,
+            gcode::post_pause,
+            axis::get_position,
+            axis::get_axis_name_position,
+            axis::get_axis_name_settings,
+            axis::get_e_settings,
+            axis::put_axis_name_settings,
+            axis::put_e_settings,
+            axis::post_axis_name_reference,
+            heating::get_hotend_settings,
+            heating::get_bed_settings,
+            heating::get_chamber_settings,
+            heating::put_hotend_settings,
+            heating::put_bed_settings,
+            heating::put_chamber_settings,
+            error::get,
+            error::get_last,
+            error::get_id,
+        ]
+    };
     rocket::execute(
         rocket::build()
             .configure::<RocketConfig>((&settings.config().api).into())
@@ -34,33 +51,7 @@ pub fn launch(
             .manage(decoder_send)
             .manage(estop_send)
             .manage(errors)
-            .mount(
-                "/v0/",
-                routes![
-                    post_estop,
-                    gcode::get,
-                    gcode::post_start,
-                    gcode::post_stop,
-                    gcode::post_continue,
-                    gcode::post_pause,
-                    axis::get_position,
-                    axis::get_axis_name_position,
-                    axis::get_axis_name_settings,
-                    axis::get_e_settings,
-                    axis::put_axis_name_settings,
-                    axis::put_e_settings,
-                    axis::post_axis_name_reference,
-                    heating::get_hotend_settings,
-                    heating::get_bed_settings,
-                    heating::get_chamber_settings,
-                    heating::put_hotend_settings,
-                    heating::put_bed_settings,
-                    heating::put_chamber_settings,
-                    error::get,
-                    error::get_last,
-                    error::get_id,
-                ],
-            )
+            .mount("/v0/", routes_v0)
             .launch(),
     )
     .map(|_| ())
