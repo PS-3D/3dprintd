@@ -2,6 +2,7 @@ use crate::comms::ControlComms;
 use anyhow::Error;
 use crossbeam::channel::Receiver;
 use indexmap::IndexMap;
+use log::error;
 use serde::Serialize;
 use std::{
     cmp,
@@ -54,6 +55,7 @@ impl Errors {
         Self(Arc::new(Mutex::new(InnerErrors::default())))
     }
 
+    // FIXME add limit to errors
     fn insert(&self, error: Error) {
         let mut inner = self.0.lock().unwrap();
         let id = inner.next_id;
@@ -100,7 +102,10 @@ pub fn start(error_recv: Receiver<ControlComms<Error>>) -> (JoinHandle<()>, Erro
     let errors_clone = errors.clone();
     let handle = thread::spawn(move || loop {
         match error_recv.recv().unwrap() {
-            ControlComms::Msg(e) => errors.insert(e),
+            ControlComms::Msg(e) => {
+                error!("{}", e);
+                errors.insert(e)
+            }
             ControlComms::Exit => break,
         }
     });
