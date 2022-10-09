@@ -14,9 +14,9 @@ use std::{
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct InnerAxisMotorSettings {
-    reference_speed: Option<u32>,
-    reference_accel_decel: Option<u32>,
-    reference_jerk: Option<u32>,
+    pub reference_speed: Option<u32>,
+    pub reference_accel_decel: Option<u32>,
+    pub reference_jerk: Option<u32>,
 }
 
 #[derive(Debug)]
@@ -34,11 +34,17 @@ where
     settings: Arc<RwLock<InnerSettings>>,
 }
 
-macro_rules! get_settings_motor {
+macro_rules! get_motor_setting {
     ($self:ident, $setting:ident, $config:ident) => {{
         ($self.f)(&$self.settings.read().unwrap().motors)
             .$setting
             .unwrap_or(($self.c)(&$self.config.motors).$config)
+    }};
+}
+
+macro_rules! set_motor_setting {
+    ($self:ident, $setting:ident, $value:expr) => {{
+        ($self.fm)(&mut $self.settings.write().unwrap().motors).$setting = Some($value)
     }};
 }
 
@@ -49,15 +55,27 @@ where
     C: Fn(&config::Motors) -> &config::AxisMotor,
 {
     pub fn get_reference_speed(&self) -> u32 {
-        get_settings_motor!(self, reference_speed, default_reference_speed)
+        get_motor_setting!(self, reference_speed, default_reference_speed)
+    }
+
+    pub fn set_reference_speed(&self, speed: u32) {
+        set_motor_setting!(self, reference_speed, speed)
     }
 
     pub fn get_reference_accel_decel(&self) -> u32 {
-        get_settings_motor!(self, reference_accel_decel, default_reference_accel)
+        get_motor_setting!(self, reference_accel_decel, default_reference_accel)
+    }
+
+    pub fn set_reference_accel_decel(&self, accel: u32) {
+        set_motor_setting!(self, reference_accel_decel, accel)
     }
 
     pub fn get_reference_jerk(&self) -> u32 {
-        get_settings_motor!(self, reference_jerk, default_reference_jerk)
+        get_motor_setting!(self, reference_jerk, default_reference_jerk)
+    }
+
+    pub fn set_reference_jerk(&self, jerk: u32) {
+        set_motor_setting!(self, reference_jerk, jerk)
     }
 }
 

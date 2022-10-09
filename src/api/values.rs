@@ -6,7 +6,7 @@ use log::error;
 use serde::Serialize;
 use std::{
     cmp,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
     thread::{self, JoinHandle},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -55,9 +55,7 @@ impl Errors {
         Self(Arc::new(Mutex::new(InnerErrors::default())))
     }
 
-    // FIXME add limit to errors
-    fn insert(&self, error: Error) {
-        let mut inner = self.0.lock().unwrap();
+    fn insert_inner(&self, inner: &mut MutexGuard<InnerErrors>, error: Error) -> u64 {
         let id = inner.next_id;
         inner.errors.insert(
             id,
@@ -67,6 +65,24 @@ impl Errors {
             },
         );
         inner.next_id += 1;
+        id
+    }
+
+    // FIXME add limit to errors
+    pub fn insert(&self, error: Error) -> u64 {
+        let mut inner = self.0.lock().unwrap();
+        self.insert_inner(&mut inner, error)
+    }
+
+    pub fn insert_get(&self, error: Error) -> ApiError {
+        let mut inner = self.0.lock().unwrap();
+        let id = self.insert_inner(&mut inner, error);
+        // shouldn't panic, we just inserted the error and didn't open the lock
+        inner
+            .errors
+            .get(&id)
+            .map(|wrap| (&id, wrap).into())
+            .unwrap()
     }
 
     pub fn get_last(&self) -> Option<ApiError> {
@@ -104,7 +120,7 @@ pub fn start(error_recv: Receiver<ControlComms<Error>>) -> (JoinHandle<()>, Erro
         match error_recv.recv().unwrap() {
             ControlComms::Msg(e) => {
                 error!("{}", e);
-                errors.insert(e)
+                errors.insert(e);
             }
             ControlComms::Exit => break,
         }
