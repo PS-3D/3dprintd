@@ -13,36 +13,105 @@ use std::{
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
-struct AxisMotorSettings {
+pub struct InnerAxisMotorSettings {
     reference_speed: Option<u32>,
     reference_accel_decel: Option<u32>,
     reference_jerk: Option<u32>,
 }
 
+#[derive(Debug)]
+// must be public because of type of AxisMotorSettings
+pub struct AxisMotorSettings<F, FM, C>
+where
+    F: Fn(&InnerMotorSettings) -> &InnerAxisMotorSettings,
+    FM: Fn(&mut InnerMotorSettings) -> &mut InnerAxisMotorSettings,
+    C: Fn(&config::Motors) -> &config::AxisMotor,
+{
+    f: F,
+    fm: FM,
+    c: C,
+    config: Arc<Config>,
+    settings: Arc<RwLock<InnerSettings>>,
+}
+
+macro_rules! get_settings_motor {
+    ($self:ident, $setting:ident, $config:ident) => {{
+        ($self.f)(&$self.settings.read().unwrap().motors)
+            .$setting
+            .unwrap_or(($self.c)(&$self.config.motors).$config)
+    }};
+}
+
+impl<F, FM, C> AxisMotorSettings<F, FM, C>
+where
+    F: Fn(&InnerMotorSettings) -> &InnerAxisMotorSettings,
+    FM: Fn(&mut InnerMotorSettings) -> &mut InnerAxisMotorSettings,
+    C: Fn(&config::Motors) -> &config::AxisMotor,
+{
+    pub fn get_reference_speed(&self) -> u32 {
+        get_settings_motor!(self, reference_speed, default_reference_speed)
+    }
+
+    pub fn get_reference_accel_decel(&self) -> u32 {
+        get_settings_motor!(self, reference_accel_decel, default_reference_accel)
+    }
+
+    pub fn get_reference_jerk(&self) -> u32 {
+        get_settings_motor!(self, reference_jerk, default_reference_jerk)
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
-struct MotorSettings {
-    x: AxisMotorSettings,
-    y: AxisMotorSettings,
-    z: AxisMotorSettings,
+// must be public because of type of AxisMotorSettings
+pub struct InnerMotorSettings {
+    x: InnerAxisMotorSettings,
+    y: InnerAxisMotorSettings,
+    z: InnerAxisMotorSettings,
+}
+
+#[derive(Debug)]
+pub struct MotorSettings {
+    config: Arc<Config>,
+    settings: Arc<RwLock<InnerSettings>>,
+}
+
+macro_rules! make_ams {
+    ($axis:ident) => {
+        pub fn $axis(
+            &self,
+        ) -> AxisMotorSettings<
+            impl Fn(&InnerMotorSettings) -> &InnerAxisMotorSettings,
+            impl Fn(&mut InnerMotorSettings) -> &mut InnerAxisMotorSettings,
+            impl Fn(&config::Motors) -> &config::AxisMotor,
+        > {
+            AxisMotorSettings {
+                f: |s| &s.$axis,
+                fm: |s| &mut s.$axis,
+                c: |c| &c.$axis,
+                config: self.config.clone(),
+                settings: self.settings.clone(),
+            }
+        }
+    };
+}
+
+impl MotorSettings {
+    make_ams!(x);
+    make_ams!(y);
+    make_ams!(z);
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 struct InnerSettings {
-    motors: MotorSettings,
+    motors: InnerMotorSettings,
 }
 
 #[derive(Debug, Clone)]
 pub struct Settings {
     config: Arc<Config>,
     settings: Arc<RwLock<InnerSettings>>,
-}
-
-macro_rules! get_option {
-    ($self:expr, $($ss:ident).+, $($cs:ident).+) => {{
-        $self.settings.read().unwrap().$($ss).*.unwrap_or($self.config.$($cs).*)
-    }};
 }
 
 impl Settings {
@@ -93,76 +162,11 @@ impl Settings {
         file.flush().map_err(|e| e.into())
     }
 
-    pub fn get_motor_x_reference_speed(&self) -> u32 {
-        get_option!(
-            self,
-            motors.x.reference_speed,
-            motors.x.default_reference_speed
-        )
-    }
-
-    pub fn get_motor_y_reference_speed(&self) -> u32 {
-        get_option!(
-            self,
-            motors.y.reference_speed,
-            motors.y.default_reference_speed
-        )
-    }
-
-    pub fn get_motor_z_reference_speed(&self) -> u32 {
-        get_option!(
-            self,
-            motors.z.reference_speed,
-            motors.z.default_reference_speed
-        )
-    }
-
-    pub fn get_motor_x_reference_accel_decel(&self) -> u32 {
-        get_option!(
-            self,
-            motors.x.reference_accel_decel,
-            motors.x.default_reference_accel
-        )
-    }
-
-    pub fn get_motor_y_reference_accel_decel(&self) -> u32 {
-        get_option!(
-            self,
-            motors.y.reference_accel_decel,
-            motors.y.default_reference_accel
-        )
-    }
-
-    pub fn get_motor_z_reference_accel_decel(&self) -> u32 {
-        get_option!(
-            self,
-            motors.z.reference_accel_decel,
-            motors.z.default_reference_accel
-        )
-    }
-
-    pub fn get_motor_x_reference_jerk(&self) -> u32 {
-        get_option!(
-            self,
-            motors.x.reference_jerk,
-            motors.x.default_reference_jerk
-        )
-    }
-
-    pub fn get_motor_y_reference_jerk(&self) -> u32 {
-        get_option!(
-            self,
-            motors.y.reference_jerk,
-            motors.y.default_reference_jerk
-        )
-    }
-
-    pub fn get_motor_z_reference_jerk(&self) -> u32 {
-        get_option!(
-            self,
-            motors.z.reference_jerk,
-            motors.z.default_reference_jerk
-        )
+    pub fn motors(&self) -> MotorSettings {
+        MotorSettings {
+            config: self.config.clone(),
+            settings: self.settings.clone(),
+        }
     }
 
     pub fn config(&self) -> &Config {

@@ -9,7 +9,7 @@ use figment::{
     Figment,
 };
 use log::debug;
-pub use motors::Motors;
+pub use motors::{AxisMotor, ExtruderMotor, Motors};
 use rocket::config::{Config as RocketConfig, Ident};
 use serde::Deserialize;
 use std::{

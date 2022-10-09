@@ -25,6 +25,21 @@ pub struct Motors {
     e: Motor<SendAutoStatus>,
 }
 
+macro_rules! make_reference_motor {
+    ($name:ident, $axis:ident) => {
+        pub fn $name(&mut self, settings: &Settings) -> Result<()> {
+            Motors::reference_motor(
+                &mut self.$axis,
+                settings.config().motors.$axis.endstop_direction,
+                settings.motors().$axis().get_reference_speed(),
+                settings.motors().$axis().get_reference_accel_decel(),
+                settings.motors().$axis().get_reference_jerk(),
+            )?;
+            Ok(())
+        }
+    };
+}
+
 impl Motors {
     pub fn init(settings: &Settings, mut driver: Driver) -> Result<Self> {
         let cfg = settings.config();
@@ -99,38 +114,9 @@ impl Motors {
         Ok(())
     }
 
-    pub fn reference_x(&mut self, settings: &Settings) -> Result<()> {
-        Motors::reference_motor(
-            &mut self.x,
-            settings.config().motors.x.endstop_direction,
-            settings.get_motor_x_reference_speed(),
-            settings.get_motor_x_reference_accel_decel(),
-            settings.get_motor_x_reference_jerk(),
-        )?;
-        Ok(())
-    }
-
-    pub fn reference_y(&mut self, settings: &Settings) -> Result<()> {
-        Motors::reference_motor(
-            &mut self.y,
-            settings.config().motors.y.endstop_direction,
-            settings.get_motor_y_reference_speed(),
-            settings.get_motor_y_reference_accel_decel(),
-            settings.get_motor_y_reference_jerk(),
-        )?;
-        Ok(())
-    }
-
-    pub fn reference_z(&mut self, settings: &Settings) -> Result<()> {
-        Motors::reference_motor(
-            &mut self.z,
-            settings.config().motors.z.endstop_direction,
-            settings.get_motor_z_reference_speed(),
-            settings.get_motor_z_reference_accel_decel(),
-            settings.get_motor_z_reference_jerk(),
-        )?;
-        Ok(())
-    }
+    make_reference_motor!(reference_x, x);
+    make_reference_motor!(reference_y, y);
+    make_reference_motor!(reference_z, z);
 
     pub fn reference_all(&mut self, settings: &Settings) -> Result<()> {
         self.reference_x(settings)?;
