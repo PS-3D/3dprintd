@@ -2,7 +2,9 @@ mod axis;
 mod error;
 mod gcode;
 mod heating;
+pub mod values;
 
+use self::values::Errors;
 use crate::{
     comms::{ControlComms, DecoderComms, EStopComms},
     settings::Settings,
@@ -21,6 +23,7 @@ fn post_estop(estop_send: &State<Sender<ControlComms<EStopComms>>>) -> status::A
 
 pub fn launch(
     settings: Settings,
+    errors: Errors,
     decoder_send: Sender<ControlComms<DecoderComms>>,
     estop_send: Sender<ControlComms<EStopComms>>,
 ) -> Result<()> {
@@ -30,6 +33,7 @@ pub fn launch(
             .manage(settings)
             .manage(decoder_send)
             .manage(estop_send)
+            .manage(errors)
             .mount(
                 "/v0/",
                 routes![

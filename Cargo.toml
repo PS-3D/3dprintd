@@ -28,3 +28,4 @@ revpi = { git = "https://github.com/PS-3D/revpi-rs", branch = "dev", version = "
 nanotec-stepper-driver = { git = "https://github.com/PS-3D/nanotec-stepper-driver", branch = "dev", version = "0.1.0" }
 num-traits = "0.2.15"
 thiserror = "1.0.37"
+indexmap = "1.9.1"
