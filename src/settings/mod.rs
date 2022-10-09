@@ -156,8 +156,9 @@ impl Settings {
         })
     }
 
-    fn save(&self) -> Result<()> {
-        let mut file = File::open(&self.config.general.settings_path)?;
+    pub fn save(&self) -> Result<()> {
+        let mut file = File::create(&self.config.general.settings_path)
+            .context("Failed to open settings-file for writing")?;
         serde_json::to_writer(&file, self.settings.as_ref())?;
         file.flush().map_err(|e| e.into())
     }
