@@ -13,7 +13,8 @@ path = "src/main.rs"
 # chose 5 instead of 4 even tho 5 isn't out yet due to 5 having an option
 # to shutdown rocket properly and not just killing the process
 rocket = { version = "0.5.0-rc.2", features = ["json"] }
-gcode = "0.6.1"
+# this version of gcode fixes errors in parsing, see https://github.com/Michael-F-Bryan/gcode-rs/issues/44
+gcode = {git = "https://github.com/jmbeck15/gcode-rs", branch = "fix-newline-detection", version = "0.6.2-alpha.0"}
 figment = { version = "0.10.6", features = ["toml"] }
 serde = { version = "1.0.139", features = ["derive"] }
 serde_json = "1.0.85"
