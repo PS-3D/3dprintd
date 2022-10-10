@@ -45,7 +45,11 @@ pub fn post_start(
     errors: &State<Errors>,
 ) -> ApiGCodeActionResponse {
     let params = json_ok_or!(params, ApiGCodeActionResponse::InvalidInput(()));
-    match decoder.try_print(params.path) {
+    let canonical_path = match params.path.canonicalize() {
+        Ok(p) => p,
+        Err(e) => return ApiGCodeActionResponse::IoError(Json(errors.insert_get(e.into()))),
+    };
+    match decoder.try_print(canonical_path) {
         Ok(()) => ApiGCodeActionResponse::Accepted(()),
         Err(e) => match e {
             e if e.is::<IoError>() => ApiGCodeActionResponse::IoError(Json(errors.insert_get(e))),
