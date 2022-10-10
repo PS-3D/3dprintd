@@ -9,4 +9,20 @@ macro_rules! send_err {
     }};
 }
 
-pub(crate) use send_err;
+// needed since anyhow::ensure makes everything into an anyhow::Error
+macro_rules! ensure_own {
+    ($condition:expr, $err:expr) => {{
+        if !($condition) {
+            return Err($err.into());
+        }
+    }};
+}
+
+// needed since anyhow::bail makes everything into an anyhow::Error
+macro_rules! bail_own {
+    ($err:expr) => {{
+        return Err($err.into());
+    }};
+}
+
+pub(crate) use {bail_own, ensure_own, send_err};

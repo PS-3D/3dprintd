@@ -1,4 +1,5 @@
 use gcode::{GCode, Word};
+use std::io::Error as IoError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -23,4 +24,14 @@ pub enum StateError {
     NotPaused,
     #[error("printer isn't stopped")]
     NotStopped,
+}
+
+#[derive(Debug, Error)]
+pub enum DecoderError {
+    #[error(transparent)]
+    StateError(#[from] StateError),
+    #[error(transparent)]
+    GCodeError(#[from] GCodeError),
+    #[error(transparent)]
+    IoError(#[from] IoError),
 }

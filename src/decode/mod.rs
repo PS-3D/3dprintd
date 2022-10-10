@@ -1,10 +1,14 @@
 mod decoder;
 pub mod error;
 
-use self::{decoder::Decoder as InnerDecoder, error::StateError};
+use self::{
+    decoder::Decoder as InnerDecoder,
+    error::{DecoderError, StateError},
+};
 use crate::{
     comms::{Action, ControlComms, DecoderComms},
     settings::Settings,
+    util::ensure_own,
 };
 use anyhow::{ensure, Context, Result};
 use crossbeam::{
@@ -158,9 +162,9 @@ impl Decoder {
         decoder.reset();
     }
 
-    pub fn try_play(&self) -> Result<()> {
+    pub fn try_play(&self) -> Result<(), StateError> {
         let mut state = self.state.write().unwrap();
-        ensure!(state.is_paused(), StateError::NotPaused);
+        ensure_own!(state.is_paused(), StateError::NotPaused);
         state.play();
         Ok(())
     }
@@ -168,9 +172,9 @@ impl Decoder {
     /// Tries to pause a print
     ///
     /// Should only be used by the API thread, not the decoder thread
-    pub fn try_pause(&self) -> Result<()> {
+    pub fn try_pause(&self) -> Result<(), StateError> {
         let mut state = self.state.write().unwrap();
-        ensure!(state.is_printing(), StateError::NotPrinting);
+        ensure_own!(state.is_printing(), StateError::NotPrinting);
         state.pause();
         Ok(())
     }
