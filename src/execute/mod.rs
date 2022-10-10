@@ -52,13 +52,13 @@ fn executor_loop(
         }
         if let Some((gcode_recv, line)) = gcode.as_ref() {
             select! {
-            recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
-            recv(gcode_recv) -> msg => {
-                let (action, span) = msg.unwrap();
-                line.store(span.inner.line, Ordering::Release);
-                // TODO attach span info to error
-                send_err!(exec.exec(action), error_send)
-            },
+                recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
+                recv(gcode_recv) -> msg => {
+                    let (action, span) = msg.unwrap();
+                    line.store(span.inner.line, Ordering::Release);
+                    // TODO attach span info to error
+                    send_err!(exec.exec(action), error_send)
+                },
             }
         } else {
             select! {
