@@ -2,7 +2,6 @@ use crate::comms::ControlComms;
 use anyhow::Error;
 use crossbeam::channel::Receiver;
 use indexmap::IndexMap;
-use log::error;
 use serde::Serialize;
 use std::{
     cmp,
@@ -10,6 +9,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{SystemTime, UNIX_EPOCH},
 };
+use tracing::error;
 
 #[derive(Debug)]
 struct ErrorWrap {

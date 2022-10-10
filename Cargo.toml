@@ -21,9 +21,8 @@ serialport = "4.2.0"
 crossbeam = "0.8.1"
 anyhow = "1.0.58"
 clap = { version = "3.2.12", features = ["derive"] }
-log = "0.4.17"
-# temporary, will be switched with a more fitting logger once we get to that
-stderrlog = "0.5.3"
+tracing = "0.1.37"
+tracing-subscriber = "0.3.16"
 revpi = { git = "https://github.com/PS-3D/revpi-rs", branch = "dev", version = "0.1.0", features = ["macro"] }
 nanotec-stepper-driver = { git = "https://github.com/PS-3D/nanotec-stepper-driver", branch = "dev", version = "0.1.0" }
 num-traits = "0.2.15"

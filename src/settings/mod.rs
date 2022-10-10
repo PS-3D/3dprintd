@@ -2,7 +2,6 @@ mod config;
 
 pub use self::config::Config;
 use anyhow::{Context, Error, Result};
-use log::warn;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::{
@@ -10,6 +9,7 @@ use std::{
     io::{self, Read, Write},
     sync::{Arc, RwLock},
 };
+use tracing::warn;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]

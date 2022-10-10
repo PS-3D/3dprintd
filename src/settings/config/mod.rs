@@ -9,7 +9,6 @@ use figment::{
     providers::{Format, Toml},
     Figment,
 };
-use log::debug;
 pub use motors::{AxisMotor, ExtruderMotor, Motors};
 use rocket::config::{Config as RocketConfig, Ident};
 use serde::Deserialize;
@@ -17,6 +16,7 @@ use std::{
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
 };
+use tracing::debug;
 
 //
 
