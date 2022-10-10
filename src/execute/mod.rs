@@ -9,7 +9,7 @@ use crate::{
 };
 use anyhow::{Context, Error, Result};
 use crossbeam::{
-    channel::{self, Receiver, Sender},
+    channel::{self, Receiver, Sender, TryRecvError},
     select,
 };
 use nanotec_stepper_driver::Driver;
@@ -40,7 +40,16 @@ fn executor_loop(
         }};
     }
     loop {
-        handle_ctrl_msg!(executor_ctrl_recv.recv().unwrap());
+        // try to receive a message from the controlchannel, since it has priority
+        match executor_ctrl_recv.try_recv() {
+            Ok(msg) => handle_ctrl_msg!(msg),
+            Err(e) => match e {
+                TryRecvError::Empty => (),
+                TryRecvError::Disconnected => {
+                    panic!("executor_ctrl_recv unexpectedly disconnected")
+                }
+            },
+        }
         if let Some((gcode_recv, line)) = gcode.as_ref() {
             select! {
             recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
