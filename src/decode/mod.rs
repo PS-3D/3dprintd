@@ -17,9 +17,25 @@ use std::{
     fs::File,
     io::Read,
     path::{Path, PathBuf},
-    sync::{atomic::AtomicUsize, Arc, RwLock},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, RwLock,
+    },
     thread::{self, JoinHandle},
 };
+
+#[derive(Debug)]
+pub struct PrintingStateInfo {
+    pub path: PathBuf,
+    pub current_line: usize,
+}
+
+#[derive(Debug)]
+pub enum StateInfo {
+    Printing(PrintingStateInfo),
+    Paused(PrintingStateInfo),
+    Stopped,
+}
 
 // FIXME make buffer only parts of the gcode from the file so we don't need
 // to store all of it in memory and can print arbitrarily large files
@@ -56,6 +72,23 @@ impl State {
         Self {
             state: InnerState::Stopped,
             printing_state: None,
+        }
+    }
+
+    pub fn info(&self) -> StateInfo {
+        macro_rules! construct_printing_paused {
+            ($variant:ident) => {{
+                let printing_state = self.printing_state.as_ref().unwrap();
+                StateInfo::$variant(PrintingStateInfo {
+                    path: printing_state.path.clone(),
+                    current_line: printing_state.current_line.load(Ordering::Acquire),
+                })
+            }};
+        }
+        match self.state {
+            InnerState::Printing => construct_printing_paused!(Printing),
+            InnerState::Paused => construct_printing_paused!(Paused),
+            InnerState::Stopped => StateInfo::Stopped,
         }
     }
 
@@ -149,6 +182,10 @@ pub struct DecoderCtrl {
 impl DecoderCtrl {
     fn send_decoder_state_change(&self, msg: DecoderComms) {
         self.decoder_send.send(ControlComms::Msg(msg)).unwrap();
+    }
+
+    pub fn state_info(&self) -> StateInfo {
+        self.state.read().unwrap().info()
     }
 
     /// Tries to start a print
