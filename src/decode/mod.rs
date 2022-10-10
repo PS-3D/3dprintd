@@ -164,7 +164,7 @@ impl Decoder {
 
     pub fn try_play(&self) -> Result<(), StateError> {
         let mut state = self.state.write().unwrap();
-        ensure_own!(state.is_paused(), StateError::NotPaused);
+        ensure_own!(!state.is_stopped(), StateError::Stopped);
         state.play();
         Ok(())
     }
@@ -174,16 +174,14 @@ impl Decoder {
     /// Should only be used by the API thread, not the decoder thread
     pub fn try_pause(&self) -> Result<(), StateError> {
         let mut state = self.state.write().unwrap();
-        ensure_own!(state.is_printing(), StateError::NotPrinting);
+        ensure_own!(!state.is_stopped(), StateError::Stopped);
         state.pause();
         Ok(())
     }
 
     fn try_next(&self) -> Result<Action, StateError> {
         let mut state = self.state.write().unwrap();
-        if !state.is_printing() {
-            return Err(StateError::NotPrinting);
-        }
+        ensure_own!(state.is_printing(), StateError::NotPrinting);
         let print_state = state.printing_state_mut();
         // can't panic because there should always be something in the buffer,
         // if there is one

@@ -20,10 +20,16 @@ pub enum GCodeError {
 pub enum StateError {
     #[error("printer isn't printing")]
     NotPrinting,
-    #[error("printer isn't stopped")]
+    #[error("printer isn't paused")]
     NotPaused,
     #[error("printer isn't stopped")]
     NotStopped,
+    #[error("printer is printing")]
+    Printing,
+    #[error("printer is paused")]
+    Paused,
+    #[error("printer is stopped")]
+    Stopped,
 }
 
 #[derive(Debug, Error)]
