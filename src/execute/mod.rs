@@ -28,6 +28,7 @@ fn executor_loop(
 ) {
     let mut exec = Executor::new(settings, motors);
     let mut gcode = None;
+    // has to be macro so break will work
     macro_rules! handle_ctrl_msg {
         ($msg:expr) => {{
             match $msg {
@@ -42,7 +43,12 @@ fn executor_loop(
     loop {
         // try to receive a message from the controlchannel, since it has priority
         match executor_ctrl_recv.try_recv() {
-            Ok(msg) => handle_ctrl_msg!(msg),
+            Ok(msg) => {
+                handle_ctrl_msg!(msg);
+                // in case there is another control message, we want to receive
+                // it
+                continue;
+            }
             Err(e) => match e {
                 TryRecvError::Empty => (),
                 TryRecvError::Disconnected => {
