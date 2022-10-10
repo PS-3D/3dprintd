@@ -79,11 +79,33 @@ pub fn post_stop(
 }
 
 #[post("/gcode/continue")]
-pub fn post_continue() -> status::Custom<&'static str> {
-    status::Custom(Status::NotImplemented, "unimplemented")
+pub fn post_continue(
+    decoder: &State<Arc<Decoder>>,
+    decoder_send: &State<Sender<ControlComms<DecoderComms>>>,
+) -> ApiGCodeActionResponse {
+    match decoder.as_ref().try_play() {
+        Ok(()) => {
+            decoder_send
+                .send(ControlComms::Msg(DecoderComms::StateChanged))
+                .unwrap();
+            ApiGCodeActionResponse::Accepted(())
+        }
+        Err(_) => ApiGCodeActionResponse::StateError(()),
+    }
 }
 
 #[post("/gcode/pause")]
-pub fn post_pause() -> status::Custom<&'static str> {
-    status::Custom(Status::NotImplemented, "unimplemented")
+pub fn post_pause(
+    decoder: &State<Arc<Decoder>>,
+    decoder_send: &State<Sender<ControlComms<DecoderComms>>>,
+) -> ApiGCodeActionResponse {
+    match decoder.as_ref().try_pause() {
+        Ok(()) => {
+            decoder_send
+                .send(ControlComms::Msg(DecoderComms::StateChanged))
+                .unwrap();
+            ApiGCodeActionResponse::Accepted(())
+        }
+        Err(_) => ApiGCodeActionResponse::StateError(()),
+    }
 }
