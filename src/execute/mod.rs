@@ -48,7 +48,8 @@ pub fn start(
             let cfg = settings.config();
             let iface = serialport::new(cfg.motors.port.as_str(), cfg.motors.baud_rate)
                 .timeout(Duration::from_secs(cfg.motors.timeout))
-                .open()?;
+                .open()
+                .context("Serialport to the motors couldn't be opened")?;
             let driver = Driver::new(iface)?;
             let mut estop = driver.new_estop();
             let estop_handle = thread::spawn(move || {
