@@ -14,3 +14,13 @@ pub enum GCodeError {
     #[error("code {} would cause the printer to go out of bounds", .0)]
     OutOfBounds(GCode),
 }
+
+#[derive(Debug, Error)]
+pub enum StateError {
+    #[error("printer isn't printing")]
+    NotPrinting,
+    #[error("printer isn't stopped")]
+    NotPaused,
+    #[error("printer isn't stopped")]
+    NotStopped,
+}

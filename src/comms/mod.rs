@@ -1,6 +1,6 @@
 use nanotec_stepper_driver::RotationDirection;
 use rocket::request::FromParam;
-use std::{fs::File, time::Duration};
+use std::time::Duration;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Axis {
@@ -76,10 +76,7 @@ pub enum Action {
 }
 
 pub enum DecoderComms {
-    Print(File),
-    Stop,
-    Play,
-    Pause,
+    StateChanged,
 }
 
 pub enum EStopComms {

@@ -1,4 +1,9 @@
-use crate::comms::{ControlComms, DecoderComms};
+use std::sync::Arc;
+
+use crate::{
+    comms::{ControlComms, DecoderComms},
+    decode::Decoder,
+};
 use crossbeam::channel::Sender;
 use rocket::{get, http::Status, post, response::status, State};
 
@@ -13,9 +18,13 @@ pub fn post_start() -> status::Custom<&'static str> {
 }
 
 #[post("/gcode/stop")]
-pub fn post_stop(decoder_send: &State<Sender<ControlComms<DecoderComms>>>) -> status::Accepted<()> {
+pub fn post_stop(
+    decoder: &State<Arc<Decoder>>,
+    decoder_send: &State<Sender<ControlComms<DecoderComms>>>,
+) -> status::Accepted<()> {
+    decoder.stop();
     decoder_send
-        .send(ControlComms::Msg(DecoderComms::Stop))
+        .send(ControlComms::Msg(DecoderComms::StateChanged))
         .unwrap();
     status::Accepted(None)
 }

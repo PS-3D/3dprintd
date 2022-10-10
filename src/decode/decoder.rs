@@ -74,6 +74,7 @@ fn extract_temp_from_code(code: GCode, limit: u32) -> Result<Option<u32>> {
 // ish for example
 // FIXME maybe change to fixed point?
 // FIXME zeropoint of z axis is at the low point, currently treated as if it were at high point
+#[derive(Debug)]
 pub struct Decoder {
     settings: Settings,
     feedrate: Option<f64>,

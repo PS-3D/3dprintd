@@ -2,9 +2,12 @@ mod endpoints;
 mod error;
 pub mod values;
 
+use std::sync::Arc;
+
 use self::values::Errors;
 use crate::{
     comms::{ControlComms, DecoderComms, EStopComms},
+    decode::Decoder,
     settings::Settings,
 };
 use anyhow::Result;
@@ -14,6 +17,7 @@ use rocket::{config::Config as RocketConfig, routes};
 pub fn launch(
     settings: Settings,
     errors: Errors,
+    decoder: Arc<Decoder>,
     decoder_send: Sender<ControlComms<DecoderComms>>,
     estop_send: Sender<ControlComms<EStopComms>>,
 ) -> Result<()> {
@@ -48,9 +52,10 @@ pub fn launch(
         rocket::build()
             .configure::<RocketConfig>((&settings.config().api).into())
             .manage(settings)
+            .manage(errors)
+            .manage(decoder)
             .manage(decoder_send)
             .manage(estop_send)
-            .manage(errors)
             .mount("/v0/", routes_v0)
             .launch(),
     )

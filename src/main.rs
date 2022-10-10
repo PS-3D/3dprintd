@@ -6,7 +6,7 @@ mod pi;
 mod settings;
 mod util;
 
-use self::comms::ControlComms;
+use crate::comms::ControlComms;
 use anyhow::Result;
 use crossbeam::channel;
 use tracing_subscriber;
@@ -58,15 +58,11 @@ fn main() -> Result<()> {
         error_send.clone(),
     )?;
     let (decoder_send, decoder_recv) = channel::unbounded();
-    let decoder_handle = decode::start(
-        settings.clone(),
-        decoder_recv,
-        executor_send,
-        error_send.clone(),
-    );
+    let (decoder_handle, decoder) = decode::start(settings.clone(), decoder_recv, executor_send);
     api::launch(
         settings.clone(),
         errors,
+        decoder,
         decoder_send.clone(),
         estop_send.clone(),
     )?;
