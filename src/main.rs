@@ -9,6 +9,7 @@ mod util;
 use crate::comms::ControlComms;
 use anyhow::Result;
 use crossbeam::channel;
+use tracing::Level;
 use tracing_subscriber;
 
 pub const APP_NAME: &'static str = env!("CARGO_BIN_NAME");
@@ -45,7 +46,9 @@ pub const APP_NAME: &'static str = env!("CARGO_BIN_NAME");
 // with splitting is responsetime.
 fn main() -> Result<()> {
     // TODO swap out for something better
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt::fmt()
+        .with_max_level(Level::DEBUG)
+        .init();
     let settings = settings::settings()?;
     let (error_send, error_recv) = channel::unbounded();
     let (error_handle, errors) = api::values::start(error_recv);
