@@ -12,6 +12,17 @@ use rocket::{data::FromData, post, response::status, serde::json::Json, Responde
 
 pub(self) type JsonResult<'r, T> = Result<Json<T>, <Json<T> as FromData<'r>>::Error>;
 
+macro_rules! json_ok_or {
+    ($json_res:ident, $err:expr) => {{
+        match $json_res {
+            Ok(json) => json.0,
+            Err(_) => return $err,
+        }
+    }};
+}
+
+pub(self) use json_ok_or;
+
 #[derive(Responder)]
 pub enum ApiPutSettingsResponse {
     #[response(status = 200)]
