@@ -1,3 +1,4 @@
+use crate::APP_NAME;
 use clap::Parser;
 use figment::{
     value::{Dict, Map, Value},
@@ -6,9 +7,10 @@ use figment::{
 use std::net::IpAddr;
 
 #[derive(Parser, Debug)]
+#[clap(version)]
 pub struct Args {
     /// Overrides the path to the config file
-    #[clap(short, long, default_value_t = String::from("/etc/3dprintd/config.toml"))]
+    #[clap(short, long, default_value_t = format!("/etc/{}/config.toml", APP_NAME))]
     pub cfg: String,
     /// Overrides port on which to run the api, default is taken from the config
     /// file or is 8080

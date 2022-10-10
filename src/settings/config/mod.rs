@@ -1,6 +1,7 @@
 mod args;
 mod motors;
 
+use crate::APP_NAME;
 use anyhow::Result;
 use args::Args;
 use clap::Parser;
@@ -29,7 +30,7 @@ pub struct General {
 impl Default for General {
     fn default() -> Self {
         Self {
-            settings_path: PathBuf::from("/var/lib/3dprintd/settings.json"),
+            settings_path: PathBuf::from(format!("/var/lib/{}/settings.json", APP_NAME)),
         }
     }
 }
@@ -60,7 +61,7 @@ impl From<&Api> for RocketConfig {
         cfg.address = api.address;
         cfg.port = api.port;
         cfg.workers = api.workers;
-        cfg.ident = Ident::try_new("3dprintd").unwrap();
+        cfg.ident = Ident::try_new(APP_NAME).unwrap();
         cfg
     }
 }
