@@ -1,7 +1,10 @@
 use crossbeam::channel::Receiver;
+use gcode::Span as InnerSpan;
 use nanotec_stepper_driver::RotationDirection;
 use rocket::request::FromParam;
 use std::{
+    fmt::{self, Display},
+    path::PathBuf,
     sync::{atomic::AtomicUsize, Arc},
     time::Duration,
 };
@@ -79,8 +82,20 @@ pub enum Action {
     Wait(Duration),
 }
 
+#[derive(Debug)]
+pub struct GCodeSpan {
+    pub path: PathBuf,
+    pub inner: InnerSpan,
+}
+
+impl Display for GCodeSpan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} , line {}", self.path.display(), self.inner.line + 1)
+    }
+}
+
 pub enum ExecutorCtrl {
-    GCode(Receiver<Action>, Arc<AtomicUsize>),
+    GCode(Receiver<(Action, GCodeSpan)>, Arc<AtomicUsize>),
     Manual,
 }
 

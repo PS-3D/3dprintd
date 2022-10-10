@@ -3,7 +3,7 @@ pub mod error;
 
 use self::{decoder::Decoder as InnerDecoder, error::StateError};
 use crate::{
-    comms::{Action, ControlComms, DecoderComms, ExecutorCtrl},
+    comms::{Action, ControlComms, DecoderComms, ExecutorCtrl, GCodeSpan},
     settings::Settings,
     util::ensure_own,
 };
@@ -12,6 +12,7 @@ use crossbeam::{
     channel::{self, Receiver, Sender},
     select,
 };
+use gcode::Span;
 use std::{
     collections::VecDeque,
     fs::File,
@@ -44,10 +45,10 @@ struct PrintingState {
     // FIXME move this buffer out of state and directly into the decode thread
     // this is only really possible if we incrementally parse the gcode file
     // we can then store the location in the file here
-    pub buf: VecDeque<Action>,
+    pub buf: VecDeque<(Action, Span)>,
     // path of the file that is currently being printed
     pub path: PathBuf,
-    pub executor_gcode_send: Sender<Action>,
+    pub executor_gcode_send: Sender<(Action, GCodeSpan)>,
     // line of gcode that the executor is currently executing
     // the other end of that atomic is in the executor thread
     // this one should be read-only
@@ -94,9 +95,9 @@ impl State {
 
     pub fn print(
         &mut self,
-        actions: VecDeque<Action>,
+        actions: VecDeque<(Action, Span)>,
         path: PathBuf,
-        executor_gcode_send: Sender<Action>,
+        executor_gcode_send: Sender<(Action, GCodeSpan)>,
     ) -> &Arc<AtomicUsize> {
         match self.state {
             InnerState::Printing => panic!("can't print, already printing"),
@@ -282,20 +283,21 @@ impl DecoderThread {
         }
     }
 
-    fn try_get_next(&self) -> Result<Action, StateError> {
+    fn try_get_next(&self) -> Result<(Action, GCodeSpan), StateError> {
         let mut state = self.state.write().unwrap();
         let print_state = state.printing_state_mut().ok_or(StateError::NotPrinting)?;
         // can't panic because there should always be something in the buffer,
         // if there is one
-        let action = print_state.buf.pop_front().unwrap();
+        let (action, span) = print_state.buf.pop_front().unwrap();
+        let path = print_state.path.clone();
         // ensure there is something in the buffer:
         if print_state.buf.is_empty() {
             state.stop();
         }
-        Ok(action)
+        Ok((action, GCodeSpan { path, inner: span }))
     }
 
-    fn try_get_exec_gcode_send(&self) -> Option<Sender<Action>> {
+    fn try_get_exec_gcode_send(&self) -> Option<Sender<(Action, GCodeSpan)>> {
         let state = self.state.read().unwrap();
         Some(state.printing_state()?.executor_gcode_send.clone())
     }

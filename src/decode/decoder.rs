@@ -4,9 +4,11 @@ use crate::{
     settings::Settings,
     util::{bail_own, ensure_own},
 };
-use anyhow::{bail, ensure, Result};
-use gcode::{GCode, Mnemonic};
+use anyhow::Result;
+use gcode::{GCode, Mnemonic, Span};
 use std::{collections::VecDeque, time::Duration};
+
+type GCodeResult<T> = Result<T, GCodeError>;
 
 #[derive(Debug, PartialEq, Eq)]
 enum CoordMode {
@@ -37,7 +39,7 @@ macro_rules! assert_code {
     };
 }
 
-fn extract_temp_from_code(code: GCode, limit: u32) -> Result<Option<u32>, GCodeError> {
+fn extract_temp_from_code(code: GCode, limit: u32) -> GCodeResult<Option<u32>> {
     ensure_own!(
         !code.arguments().is_empty(),
         GCodeError::MissingArguments(code)
@@ -119,7 +121,7 @@ impl Decoder {
         }
     }
 
-    fn g0_1(&mut self, code: GCode) -> Result<Action, GCodeError> {
+    fn g0_1(&mut self, code: GCode) -> GCodeResult<Action> {
         ensure_own!(
             !code.arguments().is_empty(),
             GCodeError::MissingArguments(code)
@@ -333,7 +335,7 @@ impl Decoder {
     /// At least one argument must be present, otherwise [`GCodeError::MissingArguments`]
     /// will be returned. Same if `F` is not present and has not been present
     /// before.
-    fn g0(&mut self, code: GCode) -> Result<Action, GCodeError> {
+    fn g0(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, General, 0, 0);
         self.g0_1(code)
     }
@@ -346,7 +348,7 @@ impl Decoder {
     /// At least one argument must be present, otherwise [`GCodeError::MissingArguments`]
     /// will be returned. Same if `F` is not present and has not been present
     /// before.
-    fn g1(&mut self, code: GCode) -> Result<Action, GCodeError> {
+    fn g1(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, General, 1, 0);
         self.g0_1(code)
     }
@@ -358,7 +360,7 @@ impl Decoder {
     /// # Errors
     /// At least one argument must be present, otherwise [`GCodeError::MissingArguments`]
     /// will be returned.
-    fn g4(&mut self, code: GCode) -> Result<Action, GCodeError> {
+    fn g4(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, General, 4, 0);
         ensure_own!(
             !code.arguments().is_empty(),
@@ -389,7 +391,7 @@ impl Decoder {
     ///
     /// Warning: Since this software is sane, it uses mm internally, so it would
     /// be wise to just use mm in general
-    fn g20(&mut self, code: GCode) -> Result<(), GCodeError> {
+    fn g20(&mut self, code: GCode) -> GCodeResult<()> {
         assert_code!(code, General, 20, 0);
         ensure_own!(
             code.arguments().is_empty(),
@@ -402,7 +404,7 @@ impl Decoder {
     /// Executes G21 command
     ///
     /// Supported arguments: None
-    fn g21(&mut self, code: GCode) -> Result<(), GCodeError> {
+    fn g21(&mut self, code: GCode) -> GCodeResult<()> {
         assert_code!(code, General, 21, 0);
         ensure_own!(
             code.arguments().is_empty(),
@@ -423,7 +425,7 @@ impl Decoder {
     // FIXME maybe we could home the z axis by setting the power down to where
     //       it wouldn't hurt the print head and then slowly move the bed
     //       into the printhead and then zeroeing?
-    fn g28(&mut self, code: GCode) -> Result<VecDeque<Action>, GCodeError> {
+    fn g28(&mut self, code: GCode) -> GCodeResult<VecDeque<Action>> {
         assert_code!(code, General, 28, 0);
         let mut x = false;
         let mut y = false;
@@ -454,7 +456,7 @@ impl Decoder {
     /// Executes G90 command
     ///
     /// Supported arguments: None
-    fn g90(&mut self, code: GCode) -> Result<(), GCodeError> {
+    fn g90(&mut self, code: GCode) -> GCodeResult<()> {
         assert_code!(code, General, 90, 0);
         ensure_own!(
             code.arguments().is_empty(),
@@ -467,7 +469,7 @@ impl Decoder {
     /// Executes G91 command
     ///
     /// Supported arguments: None
-    fn g91(&mut self, code: GCode) -> Result<(), GCodeError> {
+    fn g91(&mut self, code: GCode) -> GCodeResult<()> {
         assert_code!(code, General, 91, 0);
         ensure_own!(
             code.arguments().is_empty(),
@@ -484,7 +486,7 @@ impl Decoder {
     /// # Errors
     /// At least one argument must be present, otherwise [`GCodeError::MissingArguments`]
     /// will be returned
-    fn g92(&mut self, code: GCode) -> Result<(), GCodeError> {
+    fn g92(&mut self, code: GCode) -> GCodeResult<()> {
         assert_code!(code, General, 92, 0);
         ensure_own!(
             !code.arguments().is_empty(),
@@ -515,7 +517,7 @@ impl Decoder {
     /// Executes M82 command
     ///
     /// Supported arguments: None
-    fn m82(&mut self, code: GCode) -> Result<(), GCodeError> {
+    fn m82(&mut self, code: GCode) -> GCodeResult<()> {
         assert_code!(code, Miscellaneous, 82, 0);
         ensure_own!(
             code.arguments().is_empty(),
@@ -528,7 +530,7 @@ impl Decoder {
     /// Executes M83 command
     ///
     /// Supported arguments: None
-    fn m83(&mut self, code: GCode) -> Result<(), GCodeError> {
+    fn m83(&mut self, code: GCode) -> GCodeResult<()> {
         assert_code!(code, Miscellaneous, 83, 0);
         ensure_own!(
             code.arguments().is_empty(),
@@ -541,7 +543,7 @@ impl Decoder {
     /// Executes M104 command
     ///
     /// Supported arguments: `S`
-    fn m104(&mut self, code: GCode) -> Result<Action, GCodeError> {
+    fn m104(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, Miscellaneous, 104, 0);
         self.hotend_target_temp =
             extract_temp_from_code(code, self.settings.config().hotend.limit)?;
@@ -551,7 +553,7 @@ impl Decoder {
     /// Executes M109 command
     ///
     /// Supported arguments: `S`
-    fn m109(&mut self, code: GCode) -> Result<VecDeque<Action>, GCodeError> {
+    fn m109(&mut self, code: GCode) -> GCodeResult<VecDeque<Action>> {
         assert_code!(code, Miscellaneous, 109, 0);
         self.hotend_target_temp =
             extract_temp_from_code(code, self.settings.config().hotend.limit)?;
@@ -564,7 +566,7 @@ impl Decoder {
     /// Executes M140 command
     ///
     /// Supported arguments: `S`
-    fn m140(&mut self, code: GCode) -> Result<Action, GCodeError> {
+    fn m140(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, Miscellaneous, 140, 0);
         self.bed_target_temp = extract_temp_from_code(code, self.settings.config().bed.limit)?;
         Ok(Action::BedTemp(self.bed_target_temp))
@@ -573,7 +575,7 @@ impl Decoder {
     /// Executes M190 command
     ///
     /// Supported arguments: `S`
-    fn m190(&mut self, code: GCode) -> Result<Action, GCodeError> {
+    fn m190(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, Miscellaneous, 190, 0);
         let temp = extract_temp_from_code(code, self.settings.config().bed.limit)?;
         Ok(Action::WaitBedTemp(temp))
@@ -607,7 +609,7 @@ impl Decoder {
     ///
     /// `code` must contain a supported G-, M- or TCode, otherwise an Error will
     /// be thrown.
-    pub fn decode(&mut self, code: GCode) -> Result<Option<VecDeque<Action>>, GCodeError> {
+    pub fn decode(&mut self, code: GCode) -> GCodeResult<Option<VecDeque<(Action, Span)>>> {
         macro_rules! vecdq {
             [$action:expr] => {{
                 let mut dq = VecDeque::with_capacity(1);
@@ -615,9 +617,9 @@ impl Decoder {
                 dq
             }};
         }
-
         // since we don't implement any minor numbers:
         ensure_own!(code.minor_number() == 0, GCodeError::UnknownCode(code));
+        let span = code.span();
         match code.mnemonic() {
             Mnemonic::General => match code.major_number() {
                 0 => self.g0(code).map(|a| Some(vecdq![a])),
@@ -656,6 +658,7 @@ impl Decoder {
             },
             _ => bail_own!(GCodeError::UnknownCode(code)),
         }
+        .map(|opt| opt.map(|dq| dq.into_iter().map(|a| (a, span)).collect()))
     }
 
     /// Will reset values like the feedrate which should only persist in one

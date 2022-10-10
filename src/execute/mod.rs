@@ -14,7 +14,7 @@ use crossbeam::{
 };
 use nanotec_stepper_driver::Driver;
 use std::{
-    sync::{atomic::AtomicUsize, Arc},
+    sync::atomic::Ordering,
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -43,8 +43,13 @@ fn executor_loop(
         handle_ctrl_msg!(executor_ctrl_recv.recv().unwrap());
         if let Some((gcode_recv, line)) = gcode.as_ref() {
             select! {
-                recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
-                recv(gcode_recv) -> msg => send_err!(exec.exec(msg.unwrap()), error_send),
+            recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
+            recv(gcode_recv) -> msg => {
+                let (action, span) = msg.unwrap();
+                line.store(span.inner.line, Ordering::Release);
+                // TODO attach span info to error
+                send_err!(exec.exec(action), error_send)
+            },
             }
         } else {
             select! {
