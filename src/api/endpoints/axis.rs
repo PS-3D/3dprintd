@@ -1,12 +1,6 @@
-use crate::{
-    api::values::{ApiError, Errors},
-    comms::Axis,
-    settings::Settings,
-};
-use rocket::{
-    data::FromData, get, http::Status, post, put, response::status, serde::json::Json, Responder,
-    State,
-};
+use super::{ApiPutSettingsResponse, JsonResult};
+use crate::{api::values::Errors, comms::Axis, settings::Settings};
+use rocket::{get, http::Status, post, put, response::status, serde::json::Json, State};
 use serde::{Deserialize, Serialize};
 
 #[get("/axis/position")]
@@ -31,6 +25,7 @@ pub fn get_axis_name_settings(
     axis_name: Axis,
     settings: &State<Settings>,
 ) -> status::Custom<Json<ApiGetAxisSettings>> {
+    // FIXME get all while locking once
     macro_rules! axis_setting {
         ($axis:ident, $setting_func:ident) => {
             settings.motors().$axis().$setting_func()
@@ -69,30 +64,18 @@ pub struct ApiPutAxisNameSettings {
     reference_jerk: Option<u32>,
 }
 
-#[derive(Responder)]
-pub enum PutAxisSettingsResponse {
-    #[response(status = 200)]
-    Ok(()),
-    #[response(status = 405)]
-    InvalidInput(()),
-    #[response(status = 500)]
-    SavingError(Json<ApiError>),
-}
-
 #[put("/axis/<axis_name>/settings", data = "<received_settings>")]
 pub fn put_axis_name_settings(
     axis_name: Axis,
-    received_settings: Result<
-        Json<ApiPutAxisNameSettings>,
-        <Json<ApiPutAxisNameSettings> as FromData>::Error,
-    >,
+    received_settings: JsonResult<ApiPutAxisNameSettings>,
     settings: &State<Settings>,
     errors: &State<Errors>,
-) -> PutAxisSettingsResponse {
+) -> ApiPutSettingsResponse {
     let received_settings = match received_settings {
         Ok(s) => s,
-        Err(_) => return PutAxisSettingsResponse::InvalidInput(()),
+        Err(_) => return ApiPutSettingsResponse::InvalidInput(()),
     };
+    // FIXME set all while locking once
     macro_rules! set_value {
         ($axis:ident, $set_func:ident, $field:ident) => {{
             if let Some(value) = received_settings.$field {
@@ -113,9 +96,9 @@ pub fn put_axis_name_settings(
         Axis::Z => set_axis!(z),
     }
     if let Err(e) = settings.save() {
-        PutAxisSettingsResponse::SavingError(Json(errors.insert_get(e)))
+        ApiPutSettingsResponse::SavingError(Json(errors.insert_get(e)))
     } else {
-        PutAxisSettingsResponse::Ok(())
+        ApiPutSettingsResponse::Ok(())
     }
 }
 
@@ -125,18 +108,13 @@ pub struct ApiPutExtruderSettings {}
 
 #[put("/axis/e/settings", data = "<received_settings>")]
 pub fn put_e_settings(
-    received_settings: Result<
-        Json<ApiPutExtruderSettings>,
-        <Json<ApiPutExtruderSettings> as FromData>::Error,
-    >,
-    settings: &State<Settings>,
-    errors: &State<Errors>,
-) -> PutAxisSettingsResponse {
-    let received_settings = match received_settings {
+    received_settings: JsonResult<ApiPutExtruderSettings>,
+) -> ApiPutSettingsResponse {
+    let _received_settings = match received_settings {
         Ok(s) => s,
-        Err(_) => return PutAxisSettingsResponse::InvalidInput(()),
+        Err(_) => return ApiPutSettingsResponse::InvalidInput(()),
     };
-    PutAxisSettingsResponse::Ok(())
+    ApiPutSettingsResponse::Ok(())
 }
 
 #[post("/axis/<axis_name>/reference")]
