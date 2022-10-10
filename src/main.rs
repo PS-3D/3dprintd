@@ -53,23 +53,24 @@ fn main() -> Result<()> {
     let (error_send, error_recv) = channel::unbounded();
     let (error_handle, errors) = api::values::start(error_recv);
     let (estop_send, estop_recv) = channel::unbounded();
-    let (executor_send, executor_recv) = channel::bounded(16);
+    let (executor_ctrl_send, executor_ctrl_recv) = channel::unbounded();
+    let (executor_manual_send, executor_manual_recv) = channel::unbounded();
     let (executor_handle, estop_handle) = execute::start(
         settings.clone(),
-        executor_recv,
+        executor_ctrl_recv,
+        executor_manual_recv,
         estop_recv,
         error_send.clone(),
     )?;
-    let (decoder_send, decoder_recv) = channel::unbounded();
-    let (decoder_handle, decoder) = decode::start(settings.clone(), decoder_recv, executor_send);
+    let (decoder_handle, decoder_ctrl) =
+        decode::start(settings.clone(), executor_ctrl_send, executor_manual_send);
     api::launch(
         settings.clone(),
         errors,
-        decoder,
-        decoder_send.clone(),
+        decoder_ctrl.clone(),
         estop_send.clone(),
     )?;
-    decoder_send.send(ControlComms::Exit).unwrap();
+    decoder_ctrl.exit();
     decoder_handle.join().unwrap();
     executor_handle.join().unwrap();
     estop_send.send(ControlComms::Exit).unwrap();

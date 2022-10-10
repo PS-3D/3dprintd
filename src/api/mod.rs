@@ -7,7 +7,7 @@ use std::sync::Arc;
 use self::values::Errors;
 use crate::{
     comms::{ControlComms, DecoderComms, EStopComms},
-    decode::Decoder,
+    decode::DecoderCtrl,
     settings::Settings,
 };
 use anyhow::Result;
@@ -17,8 +17,7 @@ use rocket::{config::Config as RocketConfig, routes};
 pub fn launch(
     settings: Settings,
     errors: Errors,
-    decoder: Arc<Decoder>,
-    decoder_send: Sender<ControlComms<DecoderComms>>,
+    decoder_ctrl: DecoderCtrl,
     estop_send: Sender<ControlComms<EStopComms>>,
 ) -> Result<()> {
     let routes_v0 = {
@@ -53,8 +52,7 @@ pub fn launch(
             .configure::<RocketConfig>((&settings.config().api).into())
             .manage(settings)
             .manage(errors)
-            .manage(decoder)
-            .manage(decoder_send)
+            .manage(decoder_ctrl)
             .manage(estop_send)
             .mount("/v0/", routes_v0)
             .launch(),

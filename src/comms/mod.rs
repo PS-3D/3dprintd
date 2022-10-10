@@ -1,6 +1,10 @@
+use crossbeam::channel::Receiver;
 use nanotec_stepper_driver::RotationDirection;
 use rocket::request::FromParam;
-use std::time::Duration;
+use std::{
+    sync::{atomic::AtomicUsize, Arc},
+    time::Duration,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Axis {
@@ -75,8 +79,16 @@ pub enum Action {
     Wait(Duration),
 }
 
+pub enum ExecutorCtrl {
+    GCode(Receiver<Action>, Arc<AtomicUsize>),
+    Manual,
+}
+
 pub enum DecoderComms {
-    StateChanged,
+    Started,
+    Stopped,
+    Paused,
+    Played,
 }
 
 pub enum EStopComms {

@@ -1,15 +1,13 @@
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use super::{json_ok_or, JsonResult};
 use crate::{
     api::values::{ApiError, Errors},
-    comms::{ControlComms, DecoderComms},
     decode::{
         error::{GCodeError, StateError},
-        Decoder,
+        DecoderCtrl,
     },
 };
-use crossbeam::channel::Sender;
 use rocket::{get, http::Status, post, response::status, serde::json::Json, Responder, State};
 use serde::Deserialize;
 use std::io::Error as IoError;
@@ -43,18 +41,12 @@ pub struct ApiPostGCodeStartParams {
 #[post("/gcode/start", data = "<params>")]
 pub fn post_start(
     params: JsonResult<ApiPostGCodeStartParams>,
-    decoder: &State<Arc<Decoder>>,
-    decoder_send: &State<Sender<ControlComms<DecoderComms>>>,
+    decoder: &State<DecoderCtrl>,
     errors: &State<Errors>,
 ) -> ApiGCodeActionResponse {
     let params = json_ok_or!(params, ApiGCodeActionResponse::InvalidInput(()));
-    match decoder.as_ref().try_print(params.path) {
-        Ok(()) => {
-            decoder_send
-                .send(ControlComms::Msg(DecoderComms::StateChanged))
-                .unwrap();
-            ApiGCodeActionResponse::Accepted(())
-        }
+    match decoder.try_print(params.path) {
+        Ok(()) => ApiGCodeActionResponse::Accepted(()),
         Err(e) => match e {
             e if e.is::<IoError>() => ApiGCodeActionResponse::IoError(Json(errors.insert_get(e))),
             e if e.is::<StateError>() => ApiGCodeActionResponse::StateError(()),
@@ -67,45 +59,23 @@ pub fn post_start(
 }
 
 #[post("/gcode/stop")]
-pub fn post_stop(
-    decoder: &State<Arc<Decoder>>,
-    decoder_send: &State<Sender<ControlComms<DecoderComms>>>,
-) -> status::Accepted<()> {
-    decoder.stop();
-    decoder_send
-        .send(ControlComms::Msg(DecoderComms::StateChanged))
-        .unwrap();
+pub fn post_stop(decoder_ctrl: &State<DecoderCtrl>) -> status::Accepted<()> {
+    decoder_ctrl.stop();
     status::Accepted(None)
 }
 
 #[post("/gcode/continue")]
-pub fn post_continue(
-    decoder: &State<Arc<Decoder>>,
-    decoder_send: &State<Sender<ControlComms<DecoderComms>>>,
-) -> ApiGCodeActionResponse {
-    match decoder.as_ref().try_play() {
-        Ok(()) => {
-            decoder_send
-                .send(ControlComms::Msg(DecoderComms::StateChanged))
-                .unwrap();
-            ApiGCodeActionResponse::Accepted(())
-        }
+pub fn post_continue(decoder_ctrl: &State<DecoderCtrl>) -> ApiGCodeActionResponse {
+    match decoder_ctrl.try_play() {
+        Ok(()) => ApiGCodeActionResponse::Accepted(()),
         Err(_) => ApiGCodeActionResponse::StateError(()),
     }
 }
 
 #[post("/gcode/pause")]
-pub fn post_pause(
-    decoder: &State<Arc<Decoder>>,
-    decoder_send: &State<Sender<ControlComms<DecoderComms>>>,
-) -> ApiGCodeActionResponse {
-    match decoder.as_ref().try_pause() {
-        Ok(()) => {
-            decoder_send
-                .send(ControlComms::Msg(DecoderComms::StateChanged))
-                .unwrap();
-            ApiGCodeActionResponse::Accepted(())
-        }
+pub fn post_pause(decoder: &State<DecoderCtrl>) -> ApiGCodeActionResponse {
+    match decoder.try_pause() {
+        Ok(()) => ApiGCodeActionResponse::Accepted(()),
         Err(_) => ApiGCodeActionResponse::StateError(()),
     }
 }

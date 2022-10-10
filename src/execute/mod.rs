@@ -3,14 +3,18 @@ mod motors;
 
 use self::{executor::Executor, motors::Motors};
 use crate::{
-    comms::{Action, ControlComms, EStopComms},
+    comms::{Action, ControlComms, EStopComms, ExecutorCtrl},
     settings::Settings,
     util::send_err,
 };
-use anyhow::{Error, Result};
-use crossbeam::channel::{self, Receiver, Sender};
+use anyhow::{Context, Error, Result};
+use crossbeam::{
+    channel::{self, Receiver, Sender},
+    select,
+};
 use nanotec_stepper_driver::Driver;
 use std::{
+    sync::{atomic::AtomicUsize, Arc},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -18,21 +22,43 @@ use std::{
 fn executor_loop(
     settings: Settings,
     motors: Motors,
-    executor_recv: Receiver<ControlComms<Action>>,
+    executor_ctrl_recv: Receiver<ControlComms<ExecutorCtrl>>,
+    executor_manual_recv: Receiver<Action>,
     error_send: Sender<ControlComms<Error>>,
 ) {
     let mut exec = Executor::new(settings, motors);
+    let mut gcode = None;
+    macro_rules! handle_ctrl_msg {
+        ($msg:expr) => {{
+            match $msg {
+                ControlComms::Msg(c) => match c {
+                    ExecutorCtrl::GCode(gcode_recv, line) => gcode = Some((gcode_recv, line)),
+                    ExecutorCtrl::Manual => gcode = None,
+                },
+                ControlComms::Exit => break,
+            };
+        }};
+    }
     loop {
-        match executor_recv.recv().unwrap() {
-            ControlComms::Msg(a) => send_err!(exec.exec(a), error_send),
-            ControlComms::Exit => break,
+        handle_ctrl_msg!(executor_ctrl_recv.recv().unwrap());
+        if let Some((gcode_recv, line)) = gcode.as_ref() {
+            select! {
+                recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
+                recv(gcode_recv) -> msg => send_err!(exec.exec(msg.unwrap()), error_send),
+            }
+        } else {
+            select! {
+                recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
+                recv(executor_manual_recv) -> msg => send_err!(exec.exec(msg.unwrap()), error_send)
+            }
         }
     }
 }
 
 pub fn start(
     settings: Settings,
-    executor_recv: Receiver<ControlComms<Action>>,
+    executor_ctrl_recv: Receiver<ControlComms<ExecutorCtrl>>,
+    executor_manual_recv: Receiver<Action>,
     estop_recv: Receiver<ControlComms<EStopComms>>,
     error_send: Sender<ControlComms<Error>>,
 ) -> Result<(JoinHandle<()>, JoinHandle<()>)> {
@@ -73,7 +99,13 @@ pub fn start(
         match setup(&settings, estop_recv) {
             Ok((motors, estop_handle)) => {
                 setup_send.send(Ok(estop_handle)).unwrap();
-                executor_loop(settings, motors, executor_recv, error_send);
+                executor_loop(
+                    settings,
+                    motors,
+                    executor_ctrl_recv,
+                    executor_manual_recv,
+                    error_send,
+                );
             }
             Err(e) => {
                 setup_send.send(Err(e)).unwrap();
