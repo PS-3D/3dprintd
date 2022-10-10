@@ -4,7 +4,10 @@ use super::{json_ok_or, JsonResult};
 use crate::{
     api::values::{ApiError, Errors},
     comms::{ControlComms, DecoderComms},
-    decode::{error::StateError, Decoder},
+    decode::{
+        error::{GCodeError, StateError},
+        Decoder,
+    },
 };
 use crossbeam::channel::Sender;
 use rocket::{get, http::Status, post, response::status, serde::json::Json, Responder, State};
@@ -28,6 +31,8 @@ pub enum ApiGCodeActionResponse {
     OtherError(Json<ApiError>),
     #[response(status = 512)]
     IoError(Json<ApiError>),
+    #[response(status = 513)]
+    GCodeError(Json<ApiError>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +58,9 @@ pub fn post_start(
         Err(e) => match e {
             e if e.is::<IoError>() => ApiGCodeActionResponse::IoError(Json(errors.insert_get(e))),
             e if e.is::<StateError>() => ApiGCodeActionResponse::StateError(()),
+            e if e.is::<GCodeError>() => {
+                ApiGCodeActionResponse::GCodeError(Json(errors.insert_get(e)))
+            }
             _ => ApiGCodeActionResponse::OtherError(Json(errors.insert_get(e))),
         },
     }
