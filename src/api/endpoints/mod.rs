@@ -18,7 +18,7 @@ pub enum ApiPutSettingsResponse {
     Ok(()),
     #[response(status = 405)]
     InvalidInput(()),
-    #[response(status = 500)]
+    #[response(status = 512)]
     SavingError(Json<ApiError>),
 }
 
