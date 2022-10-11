@@ -5,49 +5,16 @@ use crate::{
     api::values::{ApiError, Errors},
     decode::{
         error::{GCodeError, StateError},
-        DecoderCtrl, PrintingStateInfo, StateInfo,
+        DecoderCtrl, StateInfo,
     },
 };
 use rocket::{get, http::Status, post, response::status, serde::json::Json, Responder, State};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::io::Error as IoError;
 
-#[derive(Debug, Serialize)]
-pub struct ApiGetGCodePrintingPaused {
-    path: PathBuf,
-    line: usize,
-}
-
-impl From<PrintingStateInfo> for ApiGetGCodePrintingPaused {
-    fn from(info: PrintingStateInfo) -> Self {
-        Self {
-            path: info.path,
-            line: info.current_line,
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "status", rename_all = "lowercase")]
-pub enum ApiGetGCodeStatus {
-    Printing(ApiGetGCodePrintingPaused),
-    Paused(ApiGetGCodePrintingPaused),
-    Stopped,
-}
-
-impl From<StateInfo> for ApiGetGCodeStatus {
-    fn from(info: StateInfo) -> Self {
-        match info {
-            StateInfo::Printing(i) => Self::Printing(i.into()),
-            StateInfo::Paused(i) => Self::Paused(i.into()),
-            StateInfo::Stopped => Self::Stopped,
-        }
-    }
-}
-
 #[get("/gcode")]
-pub fn get(decoder: &State<DecoderCtrl>) -> status::Custom<Json<ApiGetGCodeStatus>> {
-    status::Custom(Status::Ok, Json(decoder.state_info().into()))
+pub fn get(decoder: &State<DecoderCtrl>) -> status::Custom<Json<StateInfo>> {
+    status::Custom(Status::Ok, Json(decoder.state_info()))
 }
 
 #[derive(Responder)]

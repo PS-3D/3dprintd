@@ -13,6 +13,7 @@ use crossbeam::{
     select,
 };
 use gcode::Span;
+use serde::Serialize;
 use std::{
     collections::VecDeque,
     fs::File,
@@ -25,13 +26,14 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct PrintingStateInfo {
     pub path: PathBuf,
-    pub current_line: usize,
+    pub line: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
 pub enum StateInfo {
     Printing(PrintingStateInfo),
     Paused(PrintingStateInfo),
@@ -82,7 +84,7 @@ impl State {
                 let printing_state = self.printing_state.as_ref().unwrap();
                 StateInfo::$variant(PrintingStateInfo {
                     path: printing_state.path.clone(),
-                    current_line: printing_state.current_line.load(Ordering::Acquire),
+                    line: printing_state.current_line.load(Ordering::Acquire),
                 })
             }};
         }
