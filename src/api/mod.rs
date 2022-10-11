@@ -10,7 +10,7 @@ use crate::{
 };
 use anyhow::Result;
 use crossbeam::channel::Sender;
-use rocket::{config::Config as RocketConfig, routes};
+use rocket::{catchers, config::Config as RocketConfig, routes};
 
 pub fn launch(
     settings: Settings,
@@ -55,6 +55,7 @@ pub fn launch(
             .manage(oneway_data_read)
             .manage(estop_send)
             .mount("/v0/", routes_v0)
+            .register("/", catchers![endpoints::catch_404])
             .launch(),
     )
     .map(|_| ())

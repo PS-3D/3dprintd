@@ -8,7 +8,7 @@ use crate::{
     comms::{ControlComms, EStopComms},
 };
 use crossbeam::channel::Sender;
-use rocket::{data::FromData, post, response::status, serde::json::Json, Responder, State};
+use rocket::{catch, data::FromData, post, response::status, serde::json::Json, Responder, State};
 
 pub(self) type JsonResult<'r, T> = Result<Json<T>, <Json<T> as FromData<'r>>::Error>;
 
@@ -39,4 +39,9 @@ pub fn post_estop(estop_send: &State<Sender<ControlComms<EStopComms>>>) -> statu
         .send(ControlComms::Msg(EStopComms::EStop))
         .unwrap();
     status::Accepted(None)
+}
+
+#[catch(404)]
+pub fn catch_404() -> () {
+    ()
 }
