@@ -1,5 +1,5 @@
 use super::{ApiPutSettingsResponse, JsonResult};
-use crate::{api::values::Errors, comms::Axis, settings::Settings};
+use crate::{api::values::Errors, comms::Axis, decode::DecoderCtrl, settings::Settings};
 use rocket::{get, http::Status, post, put, response::status, serde::json::Json, State};
 use serde::{Deserialize, Serialize};
 
@@ -118,6 +118,12 @@ pub fn put_e_settings(
 }
 
 #[post("/axis/<axis_name>/reference")]
-pub fn post_axis_name_reference(axis_name: Axis) -> status::Custom<&'static str> {
-    status::Custom(Status::NotImplemented, "unimplemented")
+pub fn post_axis_name_reference(
+    axis_name: Axis,
+    decoder_ctrl: &State<DecoderCtrl>,
+) -> Result<status::Accepted<()>, status::Custom<()>> {
+    decoder_ctrl
+        .try_reference_axis(axis_name)
+        .map(|_| status::Accepted(None))
+        .map_err(|_| status::Custom(Status { code: 409 }, ()))
 }

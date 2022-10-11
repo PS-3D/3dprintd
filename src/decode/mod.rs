@@ -3,7 +3,9 @@ pub mod error;
 
 use self::{decoder::Decoder as InnerDecoder, error::StateError};
 use crate::{
-    comms::{Action, ControlComms, DecoderComms, ExecutorCtrl, ExecutorGCodeComms, GCodeSpan},
+    comms::{
+        Action, Axis, ControlComms, DecoderComms, ExecutorCtrl, ExecutorGCodeComms, GCodeSpan,
+    },
     settings::Settings,
     util::ensure_own,
 };
@@ -189,6 +191,15 @@ impl DecoderCtrl {
 
     pub fn state_info(&self) -> StateInfo {
         self.state.read().unwrap().info()
+    }
+
+    pub fn try_reference_axis(&self, axis: Axis) -> Result<(), StateError> {
+        let state = self.state.read().unwrap();
+        ensure_own!(state.is_stopped(), StateError::NotStopped);
+        self.executor_manual_send
+            .send(Action::ReferenceAxis(axis))
+            .unwrap();
+        Ok(())
     }
 
     /// Tries to start a print
