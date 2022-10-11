@@ -60,10 +60,18 @@ fn executor_loop(
             select! {
                 recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
                 recv(gcode_recv) -> msg => {
-                    let (action, span) = msg.unwrap();
-                    line.store(span.inner.line, Ordering::Release);
-                    // TODO attach span info to error
-                    send_err!(exec.exec(action), error_send)
+                    // we need the Exit here as well, because that means
+                    // that the gcode finished. We can't use exec_ctrl for this
+                    // because we might get the message before we executed
+                    // all messages from the gcode buffer
+                    match msg.unwrap() {
+                        ControlComms::Msg((action, span)) => {
+                            line.store(span.inner.line, Ordering::Release);
+                            // TODO attach span info to error
+                            send_err!(exec.exec(action), error_send)
+                        },
+                        ControlComms::Exit => gcode = None,
+                    }
                 },
             }
         } else {

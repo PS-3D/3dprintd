@@ -3,7 +3,7 @@ pub mod error;
 
 use self::{decoder::Decoder as InnerDecoder, error::StateError};
 use crate::{
-    comms::{Action, ControlComms, DecoderComms, ExecutorCtrl, GCodeSpan},
+    comms::{Action, ControlComms, DecoderComms, ExecutorCtrl, ExecutorGCodeComms, GCodeSpan},
     settings::Settings,
     util::ensure_own,
 };
@@ -50,7 +50,7 @@ struct PrintingState {
     pub buf: VecDeque<(Action, Span)>,
     // path of the file that is currently being printed
     pub path: PathBuf,
-    pub executor_gcode_send: Sender<(Action, GCodeSpan)>,
+    pub executor_gcode_send: Sender<ExecutorGCodeComms>,
     // line of gcode that the executor is currently executing
     // the other end of that atomic is in the executor thread
     // this one should be read-only
@@ -99,7 +99,7 @@ impl State {
         &mut self,
         actions: VecDeque<(Action, Span)>,
         path: PathBuf,
-        executor_gcode_send: Sender<(Action, GCodeSpan)>,
+        executor_gcode_send: Sender<ExecutorGCodeComms>,
     ) -> &Arc<AtomicUsize> {
         match self.state {
             InnerState::Printing => panic!("can't print, already printing"),
@@ -294,12 +294,18 @@ impl DecoderThread {
         let path = print_state.path.clone();
         // ensure there is something in the buffer:
         if print_state.buf.is_empty() {
+            // send an Exit message in the gcode channel, signalling the end
+            // of the gcode
+            print_state
+                .executor_gcode_send
+                .send(ControlComms::Exit)
+                .unwrap();
             state.stop();
         }
         Ok((action, GCodeSpan { path, inner: span }))
     }
 
-    fn try_get_exec_gcode_send(&self) -> Option<Sender<(Action, GCodeSpan)>> {
+    fn try_get_exec_gcode_send(&self) -> Option<Sender<ExecutorGCodeComms>> {
         let state = self.state.read().unwrap();
         Some(state.printing_state()?.executor_gcode_send.clone())
     }
@@ -344,7 +350,7 @@ fn decoder_loop(decoder: DecoderThread, decoder_recv: Receiver<ControlComms<Deco
                     recv(decoder_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
                     // the take().unwrap() can't fail, we wouldn't be in here if
                     // the buf were None
-                    send(executor_gcode_send, buf.take().unwrap()) -> res => {
+                    send(executor_gcode_send, ControlComms::Msg(buf.take().unwrap())) -> res => {
                         // if res is an error, it means that the other end of the
                         // gcode channel was disconnected, meaning we stopped printing
                         // and the other end of the channel was closed before

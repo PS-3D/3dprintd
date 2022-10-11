@@ -94,8 +94,10 @@ impl Display for GCodeSpan {
     }
 }
 
+pub type ExecutorGCodeComms = ControlComms<(Action, GCodeSpan)>;
+
 pub enum ExecutorCtrl {
-    GCode(Receiver<(Action, GCodeSpan)>, Arc<AtomicUsize>),
+    GCode(Receiver<ExecutorGCodeComms>, Arc<AtomicUsize>),
     Manual,
 }
 
