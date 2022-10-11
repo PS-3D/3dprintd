@@ -1,16 +1,66 @@
 use super::{ApiPutSettingsResponse, JsonResult};
-use crate::{api::values::Errors, comms::Axis, decode::DecoderCtrl, settings::Settings};
+use crate::{
+    api::values::Errors,
+    comms::{Axis, OnewayAtomicF64Read, OnewayDataRead},
+    decode::DecoderCtrl,
+    settings::Settings,
+};
 use rocket::{get, http::Status, post, put, response::status, serde::json::Json, State};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Serialize)]
+pub struct ApiGetAxisNamePosition {
+    position: f64,
+}
+
+impl From<&OnewayAtomicF64Read> for ApiGetAxisNamePosition {
+    fn from(read: &OnewayAtomicF64Read) -> Self {
+        Self {
+            position: read.read(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApiGetAxisPosition {
+    x: ApiGetAxisNamePosition,
+    y: ApiGetAxisNamePosition,
+    z: ApiGetAxisNamePosition,
+}
+
+impl From<&OnewayDataRead> for ApiGetAxisPosition {
+    fn from(read: &OnewayDataRead) -> Self {
+        Self {
+            x: (&read.pos_x).into(),
+            y: (&read.pos_y).into(),
+            z: (&read.pos_z).into(),
+        }
+    }
+}
+
 #[get("/axis/position")]
-pub fn get_position() -> status::Custom<&'static str> {
-    status::Custom(Status::NotImplemented, "unimplemented")
+pub fn get_position(
+    oneway_data_read: &State<OnewayDataRead>,
+) -> status::Custom<Json<ApiGetAxisPosition>> {
+    status::Custom(Status::Ok, Json(State::inner(oneway_data_read).into()))
 }
 
 #[get("/axis/<axis_name>/position")]
-pub fn get_axis_name_position(axis_name: Axis) -> status::Custom<&'static str> {
-    status::Custom(Status::NotImplemented, "unimplemented")
+pub fn get_axis_name_position(
+    axis_name: Axis,
+    oneway_data_read: &State<OnewayDataRead>,
+) -> status::Custom<Json<ApiGetAxisNamePosition>> {
+    macro_rules! get_pos {
+        ($axis:ident) => {
+            (&oneway_data_read.$axis).into()
+        };
+    }
+    let position = match axis_name {
+        Axis::X => get_pos!(pos_x),
+        Axis::Y => get_pos!(pos_y),
+        Axis::Z => get_pos!(pos_z),
+    };
+    status::Custom(Status::Ok, Json(position))
 }
 
 #[derive(Debug, Serialize)]

@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     let (estop_send, estop_recv) = channel::unbounded();
     let (executor_ctrl_send, executor_ctrl_recv) = channel::unbounded();
     let (executor_manual_send, executor_manual_recv) = channel::unbounded();
-    let (executor_handle, estop_handle) = execute::start(
+    let (executor_handle, estop_handle, oneway_data_read) = execute::start(
         settings.clone(),
         executor_ctrl_recv,
         executor_manual_recv,
@@ -68,6 +68,7 @@ fn main() -> Result<()> {
         settings.clone(),
         errors,
         decoder_ctrl.clone(),
+        oneway_data_read,
         estop_send.clone(),
     )?;
     decoder_ctrl.exit();
@@ -79,3 +80,5 @@ fn main() -> Result<()> {
     error_handle.join().unwrap();
     Ok(())
 }
+
+// TODO change settings depending on release or debug build, i.e. maybe stop on ctrlc

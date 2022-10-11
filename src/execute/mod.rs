@@ -3,7 +3,7 @@ mod motors;
 
 use self::{executor::Executor, motors::Motors};
 use crate::{
-    comms::{Action, ControlComms, EStopComms, ExecutorCtrl},
+    comms::{Action, ControlComms, EStopComms, ExecutorCtrl, OnewayDataRead},
     settings::Settings,
     util::send_err,
 };
@@ -66,6 +66,7 @@ fn executor_loop(
                     // all messages from the gcode buffer
                     match msg.unwrap() {
                         ControlComms::Msg((action, span)) => {
+                            // FIXME maybe use Ordering::Relaxed since it doesn't really matter?
                             line.store(span.inner.line, Ordering::Release);
                             // TODO attach span info to error
                             send_err!(exec.exec(action), error_send)
@@ -89,7 +90,7 @@ pub fn start(
     executor_manual_recv: Receiver<Action>,
     estop_recv: Receiver<ControlComms<EStopComms>>,
     error_send: Sender<ControlComms<Error>>,
-) -> Result<(JoinHandle<()>, JoinHandle<()>)> {
+) -> Result<(JoinHandle<()>, JoinHandle<()>, OnewayDataRead)> {
     let (setup_send, setup_recv) = channel::bounded(1);
     // do it this way all in the executorhread because we can't send motors between
     // threads. We then send the result of the setup via the above channel.
@@ -126,7 +127,16 @@ pub fn start(
         }
         match setup(&settings, estop_recv) {
             Ok((motors, estop_handle)) => {
-                setup_send.send(Ok(estop_handle)).unwrap();
+                setup_send
+                    .send(Ok((
+                        estop_handle,
+                        OnewayDataRead {
+                            pos_x: motors.x_pos_mm_read(),
+                            pos_y: motors.y_pos_mm_read(),
+                            pos_z: motors.z_pos_mm_read(),
+                        },
+                    )))
+                    .unwrap();
                 executor_loop(
                     settings,
                     motors,
@@ -140,6 +150,6 @@ pub fn start(
             }
         }
     });
-    let estop_handle = setup_recv.recv().unwrap()?;
-    Ok((executor_handle, estop_handle))
+    let (estop_handle, oneway_data_read) = setup_recv.recv().unwrap()?;
+    Ok((executor_handle, estop_handle, oneway_data_read))
 }

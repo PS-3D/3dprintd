@@ -22,7 +22,7 @@ impl Executor {
 
     pub fn exec(&mut self, action: Action) -> Result<()> {
         match action {
-            Action::MoveAll(m) => self.motors.move_all(&m),
+            Action::MoveAll(m) => self.motors.move_all(&m, self.settings.config()),
             Action::ReferenceAll => self.motors.reference_all(&self.settings),
             Action::ReferenceAxis(a) => match a {
                 Axis::X => self.motors.reference_x(&self.settings),

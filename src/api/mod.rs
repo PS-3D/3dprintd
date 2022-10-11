@@ -2,11 +2,9 @@ mod endpoints;
 mod error;
 pub mod values;
 
-use std::sync::Arc;
-
 use self::values::Errors;
 use crate::{
-    comms::{ControlComms, DecoderComms, EStopComms},
+    comms::{ControlComms, EStopComms, OnewayDataRead},
     decode::DecoderCtrl,
     settings::Settings,
 };
@@ -18,6 +16,7 @@ pub fn launch(
     settings: Settings,
     errors: Errors,
     decoder_ctrl: DecoderCtrl,
+    oneway_data_read: OnewayDataRead,
     estop_send: Sender<ControlComms<EStopComms>>,
 ) -> Result<()> {
     let routes_v0 = {
@@ -53,6 +52,7 @@ pub fn launch(
             .manage(settings)
             .manage(errors)
             .manage(decoder_ctrl)
+            .manage(oneway_data_read)
             .manage(estop_send)
             .mount("/v0/", routes_v0)
             .launch(),

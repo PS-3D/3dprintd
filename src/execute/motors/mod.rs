@@ -2,14 +2,19 @@ pub mod error;
 
 use self::error::{MotorError, MotorsError};
 use crate::{
-    comms::{AxisMovement, ExtruderMovement, Movement},
-    settings::Settings,
+    comms::{AxisMovement, ExtruderMovement, Movement, OnewayAtomicF64Read, OnewayAtomicF64Write},
+    settings::{Config, Settings},
 };
 use anyhow::{ensure, Result};
 use nanotec_stepper_driver::{
     AllMotor, Driver, DriverError, Ignore, LimitSwitchBehavior, Motor, MotorStatus,
     PositioningMode, Repetitions, RespondMode, ResponseHandle, RotationDirection, SendAutoStatus,
 };
+
+struct AxisMotorWrap {
+    motor: Motor<SendAutoStatus>,
+    pos_mm: OnewayAtomicF64Write,
+}
 
 // TODO maybe store state for all motors as in valid or invalid
 // -> set invalid after encountered error,
@@ -19,9 +24,9 @@ use nanotec_stepper_driver::{
 //    fails, keep state invalid
 pub struct Motors {
     all: AllMotor,
-    x: Motor<SendAutoStatus>,
-    y: Motor<SendAutoStatus>,
-    z: Motor<SendAutoStatus>,
+    x: AxisMotorWrap,
+    y: AxisMotorWrap,
+    z: AxisMotorWrap,
     e: Motor<SendAutoStatus>,
 }
 
@@ -29,12 +34,13 @@ macro_rules! make_reference_motor {
     ($name:ident, $axis:ident) => {
         pub fn $name(&mut self, settings: &Settings) -> Result<()> {
             Motors::reference_motor(
-                &mut self.$axis,
+                &mut self.$axis.motor,
                 settings.config().motors.$axis.endstop_direction,
                 settings.motors().$axis().get_reference_speed(),
                 settings.motors().$axis().get_reference_accel_decel(),
                 settings.motors().$axis().get_reference_jerk(),
             )?;
+            self.$axis.pos_mm.write(0.0);
             Ok(())
         }
     };
@@ -72,9 +78,36 @@ impl Motors {
         e.set_accel_ramp_no_conversion(cfg.motors.e.quickstop_ramp)?
             .wait()
             .ignore()?;
-        let motors = Motors { all, x, y, z, e };
+        let motors = Motors {
+            all,
+            x: AxisMotorWrap {
+                motor: x,
+                pos_mm: OnewayAtomicF64Write::new(0.0),
+            },
+            y: AxisMotorWrap {
+                motor: y,
+                pos_mm: OnewayAtomicF64Write::new(0.0),
+            },
+            z: AxisMotorWrap {
+                motor: z,
+                pos_mm: OnewayAtomicF64Write::new(0.0),
+            },
+            e,
+        };
         // FIXME init positioningmode, turningdirection, etc.
         Ok(motors)
+    }
+
+    pub fn x_pos_mm_read(&self) -> OnewayAtomicF64Read {
+        self.x.pos_mm.get_read()
+    }
+
+    pub fn y_pos_mm_read(&self) -> OnewayAtomicF64Read {
+        self.y.pos_mm.get_read()
+    }
+
+    pub fn z_pos_mm_read(&self) -> OnewayAtomicF64Read {
+        self.z.pos_mm.get_read()
     }
 
     fn reference_motor(
@@ -125,8 +158,23 @@ impl Motors {
         Ok(())
     }
 
+    fn update_mm_xzy(&self, m: &Movement, config: &Config) {
+        macro_rules! update_axis {
+            ($axis:ident) => {{
+                self.$axis.pos_mm.write(
+                    (config.motors.$axis.translation
+                        / (config.motors.$axis.step_size as u32 as f64))
+                        * (m.$axis.distance as f64),
+                )
+            }};
+        }
+        update_axis!(x);
+        update_axis!(y);
+        update_axis!(z);
+    }
+
     // will only return a DriverError or MotorsError
-    pub fn move_all(&mut self, m: &Movement) -> Result<()> {
+    pub fn move_all(&mut self, m: &Movement, config: &Config) -> Result<()> {
         // set all quiet so setting of values goes faster
         // we can unwrap here and all following until we set respondmode to notquiet
         // again because there won't be any response anyways so there can't be
@@ -199,9 +247,9 @@ impl Motors {
             Ok(())
         }
 
-        prepare_move_axis(&mut self.x, &m.x)?;
-        prepare_move_axis(&mut self.y, &m.y)?;
-        prepare_move_axis(&mut self.z, &m.z)?;
+        prepare_move_axis(&mut self.x.motor, &m.x)?;
+        prepare_move_axis(&mut self.y.motor, &m.y)?;
+        prepare_move_axis(&mut self.z.motor, &m.z)?;
         prepare_move_extruder(&mut self.e, &m.e)?;
 
         // set respondmode to notquiet so we will receive the status once
@@ -231,6 +279,7 @@ impl Motors {
             .filter(|t| t.1.is_err())
             .collect();
         if errs.is_empty() {
+            self.update_mm_xzy(m, config);
             Ok(())
         } else {
             // invariant of MotorsError will be fulfilled because errs isn't empty
@@ -246,9 +295,9 @@ impl Motors {
                 // address -> Result we need to map the address back to the actual
                 // motor again
                 match addr {
-                    x if x == self.x.address() => me.x = Some(err),
-                    y if y == self.y.address() => me.y = Some(err),
-                    z if z == self.z.address() => me.z = Some(err),
+                    x if x == self.x.motor.address() => me.x = Some(err),
+                    y if y == self.y.motor.address() => me.y = Some(err),
+                    z if z == self.z.motor.address() => me.z = Some(err),
                     e if e == self.e.address() => me.e = Some(err),
                     _ => unreachable!("Received error from address that doesn't exist in the driver, it should have thrown an error already")
                 }
