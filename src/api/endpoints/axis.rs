@@ -1,11 +1,14 @@
-use super::{ApiPutSettingsResponse, JsonResult};
+use super::{json_ok_or, ApiPutSettingsResponse, JsonResult};
 use crate::{
     api::values::Errors,
     comms::{Axis, OnewayAtomicF64Read, OnewayDataRead},
     decode::DecoderCtrl,
     settings::Settings,
 };
-use rocket::{get, http::Status, post, put, response::status, serde::json::Json, State};
+use rocket::{
+    get, http::Status, post, put, request::FromParam, response::status, serde::json::Json,
+    Responder, State,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
@@ -167,13 +170,72 @@ pub fn put_e_settings(
     ApiPutSettingsResponse::Ok(())
 }
 
-#[post("/axis/<axis_name>/reference")]
-pub fn post_axis_name_reference(
-    axis_name: Axis,
+#[derive(Debug, PartialEq, Eq)]
+pub enum ApiPostAxisXYReferenceAxis {
+    X,
+    Y,
+}
+
+impl FromParam<'_> for ApiPostAxisXYReferenceAxis {
+    type Error = &'static str;
+
+    fn from_param(param: &str) -> Result<Self, Self::Error> {
+        match param {
+            "x" => Ok(Self::X),
+            "y" => Ok(Self::Y),
+            _ => Err("not x or y"),
+        }
+    }
+}
+
+impl From<ApiPostAxisXYReferenceAxis> for Axis {
+    fn from(axis: ApiPostAxisXYReferenceAxis) -> Self {
+        match axis {
+            ApiPostAxisXYReferenceAxis::X => Self::X,
+            ApiPostAxisXYReferenceAxis::Y => Self::Y,
+        }
+    }
+}
+
+#[derive(Debug, Responder)]
+pub enum ApiPostAxisReferenceResponse {
+    #[response(status = 202)]
+    Accepted(()),
+    #[response(status = 405)]
+    InvalidInput(()),
+    #[response(status = 409)]
+    StateError(()),
+}
+
+#[post("/axis/<xy>/reference")]
+pub fn post_axis_xy_reference(
+    xy: ApiPostAxisXYReferenceAxis,
     decoder_ctrl: &State<DecoderCtrl>,
 ) -> Result<status::Accepted<()>, status::Custom<()>> {
     decoder_ctrl
-        .try_reference_axis(axis_name)
+        .try_reference_axis(xy.into())
         .map(|_| status::Accepted(None))
         .map_err(|_| status::Custom(Status { code: 409 }, ()))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "direction", rename_all = "lowercase")]
+pub enum ApiPostAxisZReferenceDirection {
+    Endstop,
+    Hotend,
+}
+
+#[post("/axis/z/reference", data = "<direction>")]
+pub fn post_axis_z_reference(
+    direction: JsonResult<ApiPostAxisZReferenceDirection>,
+    decoder_ctrl: &State<DecoderCtrl>,
+) -> ApiPostAxisReferenceResponse {
+    let direction = json_ok_or!(direction, ApiPostAxisReferenceResponse::InvalidInput(()));
+    match direction {
+        ApiPostAxisZReferenceDirection::Endstop => match decoder_ctrl.try_reference_axis(Axis::Z) {
+            Ok(_) => ApiPostAxisReferenceResponse::Accepted(()),
+            Err(_) => ApiPostAxisReferenceResponse::StateError(()),
+        },
+        ApiPostAxisZReferenceDirection::Hotend => todo!(),
+    }
 }

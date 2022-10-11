@@ -29,6 +29,7 @@ impl Executor {
                 Axis::Y => self.motors.reference_y(&self.settings),
                 Axis::Z => self.motors.reference_z(&self.settings),
             },
+            Action::ReferenceZHotend => todo!(),
             Action::HotendTemp(t) => todo!(),
             Action::BedTemp(t) => todo!(),
             // FIXME add timeouts for temp waits, otherwise it might wait forever

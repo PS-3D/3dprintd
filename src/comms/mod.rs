@@ -27,7 +27,7 @@ impl FromParam<'_> for Axis {
             "x" => Ok(Self::X),
             "y" => Ok(Self::Y),
             "z" => Ok(Self::Z),
-            _ => Err("not a valid axis, must be X, Y or Z"),
+            _ => Err("not a valid axis, must be x, y, or z"),
         }
     }
 }
@@ -78,6 +78,7 @@ pub enum Action {
     MoveAll(Movement),
     ReferenceAll,
     ReferenceAxis(Axis),
+    ReferenceZHotend,
     HotendTemp(Option<u32>),
     BedTemp(Option<u32>),
     WaitHotendTemp(Option<u32>),
