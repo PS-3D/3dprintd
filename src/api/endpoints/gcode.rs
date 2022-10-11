@@ -1,20 +1,16 @@
-use std::path::PathBuf;
-
 use super::{json_ok_or, JsonResult};
 use crate::{
     api::values::{ApiError, Errors},
-    decode::{
-        error::{GCodeError, StateError},
-        DecoderCtrl, StateInfo,
-    },
+    hw::{GCodeError, HwCtrl, StateError, StateInfo},
 };
 use rocket::{get, http::Status, post, response::status, serde::json::Json, Responder, State};
 use serde::Deserialize;
 use std::io::Error as IoError;
+use std::path::PathBuf;
 
 #[get("/gcode")]
-pub fn get(decoder: &State<DecoderCtrl>) -> status::Custom<Json<StateInfo>> {
-    status::Custom(Status::Ok, Json(decoder.state_info()))
+pub fn get(hw_ctrl: &State<HwCtrl>) -> status::Custom<Json<StateInfo>> {
+    status::Custom(Status::Ok, Json(hw_ctrl.state_info()))
 }
 
 #[derive(Responder)]
@@ -41,7 +37,7 @@ pub struct ApiPostGCodeStartParams {
 #[post("/gcode/start", data = "<params>")]
 pub fn post_start(
     params: JsonResult<ApiPostGCodeStartParams>,
-    decoder: &State<DecoderCtrl>,
+    hw_ctrl: &State<HwCtrl>,
     errors: &State<Errors>,
 ) -> ApiGCodeActionResponse {
     let params = json_ok_or!(params, ApiGCodeActionResponse::InvalidInput(()));
@@ -49,7 +45,7 @@ pub fn post_start(
         Ok(p) => p,
         Err(e) => return ApiGCodeActionResponse::IoError(Json(errors.insert_get(e.into()))),
     };
-    match decoder.try_print(canonical_path) {
+    match hw_ctrl.try_print(canonical_path) {
         Ok(()) => ApiGCodeActionResponse::Accepted(()),
         Err(e) => match e {
             e if e.is::<IoError>() => ApiGCodeActionResponse::IoError(Json(errors.insert_get(e))),
@@ -63,22 +59,22 @@ pub fn post_start(
 }
 
 #[post("/gcode/stop")]
-pub fn post_stop(decoder_ctrl: &State<DecoderCtrl>) -> status::Accepted<()> {
-    decoder_ctrl.stop();
+pub fn post_stop(hw_ctrl: &State<HwCtrl>) -> status::Accepted<()> {
+    hw_ctrl.stop();
     status::Accepted(None)
 }
 
 #[post("/gcode/continue")]
-pub fn post_continue(decoder_ctrl: &State<DecoderCtrl>) -> ApiGCodeActionResponse {
-    match decoder_ctrl.try_play() {
+pub fn post_continue(hw_ctrl: &State<HwCtrl>) -> ApiGCodeActionResponse {
+    match hw_ctrl.try_play() {
         Ok(()) => ApiGCodeActionResponse::Accepted(()),
         Err(_) => ApiGCodeActionResponse::StateError(()),
     }
 }
 
 #[post("/gcode/pause")]
-pub fn post_pause(decoder: &State<DecoderCtrl>) -> ApiGCodeActionResponse {
-    match decoder.try_pause() {
+pub fn post_pause(hw_ctrl: &State<HwCtrl>) -> ApiGCodeActionResponse {
+    match hw_ctrl.try_pause() {
         Ok(()) => ApiGCodeActionResponse::Accepted(()),
         Err(_) => ApiGCodeActionResponse::StateError(()),
     }

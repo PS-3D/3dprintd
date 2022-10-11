@@ -1,8 +1,6 @@
 mod api;
 mod comms;
-mod decode;
-mod execute;
-mod pi;
+mod hw;
 mod settings;
 mod util;
 
@@ -52,29 +50,12 @@ fn main() -> Result<()> {
     let settings = settings::settings()?;
     let (error_send, error_recv) = channel::unbounded();
     let (error_handle, errors) = api::values::start(error_recv);
-    let (estop_send, estop_recv) = channel::unbounded();
-    let (executor_ctrl_send, executor_ctrl_recv) = channel::unbounded();
-    let (executor_manual_send, executor_manual_recv) = channel::unbounded();
-    let (executor_handle, estop_handle, oneway_data_read) = execute::start(
-        settings.clone(),
-        executor_ctrl_recv,
-        executor_manual_recv,
-        estop_recv,
-        error_send.clone(),
-    )?;
-    let (decoder_handle, decoder_ctrl) =
-        decode::start(settings.clone(), executor_ctrl_send, executor_manual_send);
-    api::launch(
-        settings.clone(),
-        errors,
-        decoder_ctrl.clone(),
-        oneway_data_read,
-        estop_send.clone(),
-    )?;
-    decoder_ctrl.exit();
+    let (executor_handle, estop_handle, decoder_handle, hw_ctrl) =
+        hw::start(settings.clone(), error_send.clone())?;
+    api::launch(settings.clone(), errors, hw_ctrl.clone())?;
+    hw_ctrl.exit();
     decoder_handle.join().unwrap();
     executor_handle.join().unwrap();
-    estop_send.send(ControlComms::Exit).unwrap();
     estop_handle.join().unwrap();
     error_send.send(ControlComms::Exit).unwrap();
     error_handle.join().unwrap();

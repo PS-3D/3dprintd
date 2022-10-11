@@ -1,8 +1,8 @@
 use super::{json_ok_or, ApiPutSettingsResponse, JsonResult};
 use crate::{
     api::values::Errors,
-    comms::{Axis, OnewayAtomicF64Read, OnewayDataRead},
-    decode::DecoderCtrl,
+    comms::Axis,
+    hw::{HwCtrl, PositionInfo},
     settings::Settings,
 };
 use rocket::{
@@ -16,11 +16,9 @@ pub struct ApiGetAxisNamePosition {
     position: f64,
 }
 
-impl From<&OnewayAtomicF64Read> for ApiGetAxisNamePosition {
-    fn from(read: &OnewayAtomicF64Read) -> Self {
-        Self {
-            position: read.read(),
-        }
+impl From<f64> for ApiGetAxisNamePosition {
+    fn from(position: f64) -> Self {
+        Self { position }
     }
 }
 
@@ -31,38 +29,32 @@ pub struct ApiGetAxisPosition {
     z: ApiGetAxisNamePosition,
 }
 
-impl From<&OnewayDataRead> for ApiGetAxisPosition {
-    fn from(read: &OnewayDataRead) -> Self {
+impl From<PositionInfo> for ApiGetAxisPosition {
+    fn from(pos_info: PositionInfo) -> Self {
         Self {
-            x: (&read.pos_x).into(),
-            y: (&read.pos_y).into(),
-            z: (&read.pos_z).into(),
+            x: pos_info.x.into(),
+            y: pos_info.y.into(),
+            z: pos_info.z.into(),
         }
     }
 }
 
 #[get("/axis/position")]
-pub fn get_position(
-    oneway_data_read: &State<OnewayDataRead>,
-) -> status::Custom<Json<ApiGetAxisPosition>> {
-    status::Custom(Status::Ok, Json(State::inner(oneway_data_read).into()))
+pub fn get_position(hw_ctrl: &State<HwCtrl>) -> status::Custom<Json<ApiGetAxisPosition>> {
+    status::Custom(Status::Ok, Json(hw_ctrl.pos_info().into()))
 }
 
 #[get("/axis/<axis_name>/position")]
 pub fn get_axis_name_position(
     axis_name: Axis,
-    oneway_data_read: &State<OnewayDataRead>,
+    hw_ctrl: &State<HwCtrl>,
 ) -> status::Custom<Json<ApiGetAxisNamePosition>> {
-    macro_rules! get_pos {
-        ($axis:ident) => {
-            (&oneway_data_read.$axis).into()
-        };
-    }
     let position = match axis_name {
-        Axis::X => get_pos!(pos_x),
-        Axis::Y => get_pos!(pos_y),
-        Axis::Z => get_pos!(pos_z),
-    };
+        Axis::X => hw_ctrl.pos_info_x(),
+        Axis::Y => hw_ctrl.pos_info_y(),
+        Axis::Z => hw_ctrl.pos_info_z(),
+    }
+    .into();
     status::Custom(Status::Ok, Json(position))
 }
 
@@ -210,9 +202,9 @@ pub enum ApiPostAxisReferenceResponse {
 #[post("/axis/<xy>/reference")]
 pub fn post_axis_xy_reference(
     xy: ApiPostAxisXYReferenceAxis,
-    decoder_ctrl: &State<DecoderCtrl>,
+    hw_ctrl: &State<HwCtrl>,
 ) -> Result<status::Accepted<()>, status::Custom<()>> {
-    decoder_ctrl
+    hw_ctrl
         .try_reference_axis(xy.into())
         .map(|_| status::Accepted(None))
         .map_err(|_| status::Custom(Status { code: 409 }, ()))
@@ -228,11 +220,11 @@ pub enum ApiPostAxisZReferenceDirection {
 #[post("/axis/z/reference", data = "<direction>")]
 pub fn post_axis_z_reference(
     direction: JsonResult<ApiPostAxisZReferenceDirection>,
-    decoder_ctrl: &State<DecoderCtrl>,
+    hw_ctrl: &State<HwCtrl>,
 ) -> ApiPostAxisReferenceResponse {
     let direction = json_ok_or!(direction, ApiPostAxisReferenceResponse::InvalidInput(()));
     match direction {
-        ApiPostAxisZReferenceDirection::Endstop => match decoder_ctrl.try_reference_axis(Axis::Z) {
+        ApiPostAxisZReferenceDirection::Endstop => match hw_ctrl.try_reference_axis(Axis::Z) {
             Ok(_) => ApiPostAxisReferenceResponse::Accepted(()),
             Err(_) => ApiPostAxisReferenceResponse::StateError(()),
         },

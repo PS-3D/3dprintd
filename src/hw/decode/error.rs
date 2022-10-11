@@ -1,3 +1,4 @@
+use super::super::state::StateError;
 use gcode::{GCode, Word};
 use std::io::Error as IoError;
 use thiserror::Error;
@@ -14,22 +15,6 @@ pub enum GCodeError {
     DuplicateArgument(Word, GCode),
     #[error("code {} would cause the printer to go out of bounds", .0)]
     OutOfBounds(GCode),
-}
-
-#[derive(Debug, Error)]
-pub enum StateError {
-    #[error("printer isn't printing")]
-    NotPrinting,
-    #[error("printer isn't paused")]
-    NotPaused,
-    #[error("printer isn't stopped")]
-    NotStopped,
-    #[error("printer is printing")]
-    Printing,
-    #[error("printer is paused")]
-    Paused,
-    #[error("printer is stopped")]
-    Stopped,
 }
 
 #[derive(Debug, Error)]

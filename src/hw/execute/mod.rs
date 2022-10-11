@@ -2,11 +2,8 @@ mod executor;
 mod motors;
 
 use self::{executor::Executor, motors::Motors};
-use crate::{
-    comms::{Action, ControlComms, EStopComms, ExecutorCtrl, OnewayDataRead},
-    settings::Settings,
-    util::send_err,
-};
+use super::comms::{Action, EStopComms, ExecutorCtrl};
+use crate::{comms::ControlComms, hw::comms::OnewayPosRead, settings::Settings, util::send_err};
 use anyhow::{Context, Error, Result};
 use crossbeam::{
     channel::{self, Receiver, Sender, TryRecvError},
@@ -90,7 +87,7 @@ pub fn start(
     executor_manual_recv: Receiver<Action>,
     estop_recv: Receiver<ControlComms<EStopComms>>,
     error_send: Sender<ControlComms<Error>>,
-) -> Result<(JoinHandle<()>, JoinHandle<()>, OnewayDataRead)> {
+) -> Result<(JoinHandle<()>, JoinHandle<()>, OnewayPosRead)> {
     let (setup_send, setup_recv) = channel::bounded(1);
     // do it this way all in the executorhread because we can't send motors between
     // threads. We then send the result of the setup via the above channel.
@@ -130,10 +127,10 @@ pub fn start(
                 setup_send
                     .send(Ok((
                         estop_handle,
-                        OnewayDataRead {
-                            pos_x: motors.x_pos_mm_read(),
-                            pos_y: motors.y_pos_mm_read(),
-                            pos_z: motors.z_pos_mm_read(),
+                        OnewayPosRead {
+                            x: motors.x_pos_mm_read(),
+                            y: motors.y_pos_mm_read(),
+                            z: motors.z_pos_mm_read(),
                         },
                     )))
                     .unwrap();

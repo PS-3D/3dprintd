@@ -1,8 +1,9 @@
 pub mod error;
 
 use self::error::{MotorError, MotorsError};
+use super::super::comms::{AxisMovement, ExtruderMovement, Movement};
 use crate::{
-    comms::{AxisMovement, ExtruderMovement, Movement, OnewayAtomicF64Read, OnewayAtomicF64Write},
+    comms::{OnewayAtomicF64Read, OnewayAtomicF64Write},
     settings::{Config, Settings},
 };
 use anyhow::{ensure, Result};

@@ -3,22 +3,11 @@ mod error;
 pub mod values;
 
 use self::values::Errors;
-use crate::{
-    comms::{ControlComms, EStopComms, OnewayDataRead},
-    decode::DecoderCtrl,
-    settings::Settings,
-};
+use crate::{hw::HwCtrl, settings::Settings};
 use anyhow::Result;
-use crossbeam::channel::Sender;
 use rocket::{catchers, config::Config as RocketConfig, routes};
 
-pub fn launch(
-    settings: Settings,
-    errors: Errors,
-    decoder_ctrl: DecoderCtrl,
-    oneway_data_read: OnewayDataRead,
-    estop_send: Sender<ControlComms<EStopComms>>,
-) -> Result<()> {
+pub fn launch(settings: Settings, errors: Errors, hw_ctrl: HwCtrl) -> Result<()> {
     let routes_v0 = {
         use self::endpoints::*;
         routes![
@@ -52,9 +41,7 @@ pub fn launch(
             .configure::<RocketConfig>((&settings.config().api).into())
             .manage(settings)
             .manage(errors)
-            .manage(decoder_ctrl)
-            .manage(oneway_data_read)
-            .manage(estop_send)
+            .manage(hw_ctrl)
             .mount("/v0/", routes_v0)
             .register("/", catchers![endpoints::catch_404])
             .launch(),

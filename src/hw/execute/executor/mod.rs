@@ -1,8 +1,5 @@
-use super::motors::Motors;
-use crate::{
-    comms::{Action, Axis},
-    settings::Settings,
-};
+use super::{super::comms::Action, motors::Motors};
+use crate::{comms::Axis, settings::Settings};
 use anyhow::Result;
 use std::{thread, time::Duration};
 

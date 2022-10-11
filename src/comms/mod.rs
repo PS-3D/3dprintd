@@ -1,15 +1,7 @@
-use crossbeam::channel::Receiver;
-use gcode::Span as InnerSpan;
-use nanotec_stepper_driver::RotationDirection;
 use rocket::request::FromParam;
-use std::{
-    fmt::{self, Display},
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Duration,
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -32,77 +24,10 @@ impl FromParam<'_> for Axis {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct AxisMovement {
-    pub distance: i32,
-    pub min_frequency: u32,
-    pub max_frequency: u32,
-    // accel and decel are in hz/s
-    pub acceleration: u32,
-    pub deceleration: u32,
-    pub acceleration_jerk: u32,
-    pub deceleration_jerk: u32,
-}
-
-#[derive(Debug, Default)]
-pub struct ExtruderMovement {
-    pub direction: RotationDirection,
-    pub distance: u32,
-    pub min_frequency: u32,
-    pub max_frequency: u32,
-    // accel and decel are in hz/s
-    pub acceleration: u32,
-    pub deceleration: u32,
-    pub acceleration_jerk: u32,
-    pub deceleration_jerk: u32,
-}
-
-// set distance to 0 if that axis shouldn't move
-// anything else can be set to random values
-#[derive(Debug)]
-pub struct Movement {
-    pub x: AxisMovement,
-    pub y: AxisMovement,
-    pub z: AxisMovement,
-    pub e: ExtruderMovement,
-}
-
 #[derive(Debug)]
 pub enum ControlComms<T> {
     Msg(T),
     Exit,
-}
-
-#[derive(Debug)]
-pub enum Action {
-    MoveAll(Movement),
-    ReferenceAll,
-    ReferenceAxis(Axis),
-    ReferenceZHotend,
-    HotendTemp(Option<u32>),
-    BedTemp(Option<u32>),
-    WaitHotendTemp(Option<u32>),
-    WaitBedTemp(Option<u32>),
-    Wait(Duration),
-}
-
-#[derive(Debug)]
-pub struct GCodeSpan {
-    pub path: PathBuf,
-    pub inner: InnerSpan,
-}
-
-impl Display for GCodeSpan {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} , line {}", self.path.display(), self.inner.line + 1)
-    }
-}
-
-pub type ExecutorGCodeComms = ControlComms<(Action, GCodeSpan)>;
-
-pub enum ExecutorCtrl {
-    GCode(Receiver<ExecutorGCodeComms>, Arc<AtomicUsize>),
-    Manual,
 }
 
 #[derive(Debug, Clone)]
@@ -144,21 +69,4 @@ impl OnewayAtomicF64Write {
         self.0
             .store(u64::from_ne_bytes(val.to_ne_bytes()), Ordering::Release)
     }
-}
-
-pub struct OnewayDataRead {
-    pub pos_x: OnewayAtomicF64Read,
-    pub pos_y: OnewayAtomicF64Read,
-    pub pos_z: OnewayAtomicF64Read,
-}
-
-pub enum DecoderComms {
-    Started,
-    Stopped,
-    Paused,
-    Played,
-}
-
-pub enum EStopComms {
-    EStop,
 }

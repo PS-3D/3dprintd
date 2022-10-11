@@ -1,9 +1,9 @@
-use super::error::GCodeError;
+use super::{
+    super::comms::{Action, AxisMovement, ExtruderMovement, Movement},
+    error::GCodeError,
+};
 use crate::{
-    comms::{
-        Action, Axis, AxisMovement, ExtruderMovement, Movement, OnewayAtomicF64Read,
-        OnewayAtomicF64Write,
-    },
+    comms::{Axis, OnewayAtomicF64Read, OnewayAtomicF64Write},
     settings::Settings,
     util::{bail_own, ensure_own},
 };
@@ -681,6 +681,8 @@ impl Decoder {
 
     /// Will reset values like the feedrate which should only persist in one
     /// run
+    // FIXME actual_pos might not match the actual real position of the printer,
+    // which might then cause it to error out once the next gcode is started
     pub fn reset(&mut self) {
         self.feedrate = None;
         self.prog_x = self.actual_x;

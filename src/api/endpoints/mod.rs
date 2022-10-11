@@ -3,11 +3,7 @@ pub mod error;
 pub mod gcode;
 pub mod heating;
 
-use crate::{
-    api::values::ApiError,
-    comms::{ControlComms, EStopComms},
-};
-use crossbeam::channel::Sender;
+use crate::{ api::values::ApiError, hw::HwCtrl};
 use rocket::{catch, data::FromData, post, response::status, serde::json::Json, Responder, State};
 
 pub(self) type JsonResult<'r, T> = Result<Json<T>, <Json<T> as FromData<'r>>::Error>;
@@ -34,10 +30,8 @@ pub enum ApiPutSettingsResponse {
 }
 
 #[post("/estop")]
-pub fn post_estop(estop_send: &State<Sender<ControlComms<EStopComms>>>) -> status::Accepted<()> {
-    estop_send
-        .send(ControlComms::Msg(EStopComms::EStop))
-        .unwrap();
+pub fn post_estop(hw_ctrl: &State<HwCtrl>) -> status::Accepted<()> {
+    hw_ctrl.estop();
     status::Accepted(None)
 }
 
