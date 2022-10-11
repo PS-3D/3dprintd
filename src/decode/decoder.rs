@@ -1,11 +1,15 @@
 use super::error::GCodeError;
 use crate::{
-    comms::{Action, Axis, AxisMovement, ExtruderMovement, Movement},
+    comms::{
+        Action, Axis, AxisMovement, ExtruderMovement, Movement, OnewayAtomicF64Read,
+        OnewayAtomicF64Write,
+    },
     settings::Settings,
     util::{bail_own, ensure_own},
 };
 use anyhow::Result;
 use gcode::{GCode, Mnemonic, Span};
+use nanotec_stepper_driver::StepMode;
 use std::{collections::VecDeque, time::Duration};
 
 type GCodeResult<T> = Result<T, GCodeError>;
@@ -63,6 +67,13 @@ fn extract_temp_from_code(code: GCode, limit: u32) -> GCodeResult<Option<u32>> {
     }
 }
 
+// (distance_in_mm / translation) * (360/1.8) * microsteps_per_step
+// conversion from StepMode to f64 can't happen directly so we have to
+// do it this way
+fn mm_to_steps(mm: f64, translation: &f64, step_size: &StepMode) -> f64 {
+    ((mm / translation) * (360.0 / 1.8) * (*step_size as u8) as f64).round()
+}
+
 // TODO state needs:
 // - feedrate
 // - current pos according to program
@@ -90,16 +101,25 @@ pub struct Decoder {
     actual_z: f64,
     steps_x: u32,
     steps_y: u32,
-    steps_z: u32,
+    // not u32, because z position operates in the negative since the
+    // endstop is at the positive end of the z-axis
+    steps_z: i32,
     xyz_coord_mode: CoordMode,
     e_coord_mode: CoordMode,
     unit: Unit,
     hotend_target_temp: Option<u32>,
     bed_target_temp: Option<u32>,
+    z_hotend_location: OnewayAtomicF64Read,
 }
 
 impl Decoder {
     pub fn new(settings: Settings) -> Self {
+        let actual_z = -(settings.config().motors.z.limit as f64);
+        let steps_z = mm_to_steps(
+            actual_z,
+            &settings.config().motors.z.translation,
+            &settings.config().motors.z.step_size,
+        ) as i32;
         Self {
             settings,
             feedrate: None,
@@ -109,16 +129,21 @@ impl Decoder {
             prog_e: 0.0,
             actual_x: 0.0,
             actual_y: 0.0,
-            actual_z: 0.0,
+            actual_z,
             steps_x: 0,
             steps_y: 0,
-            steps_z: 0,
+            steps_z,
             xyz_coord_mode: CoordMode::Absolute,
             e_coord_mode: CoordMode::Relative,
             unit: Unit::Millimeters,
             hotend_target_temp: None,
             bed_target_temp: None,
+            z_hotend_location: OnewayAtomicF64Read::new(actual_z),
         }
+    }
+
+    pub fn get_z_hotend_location_write(&self) -> OnewayAtomicF64Write {
+        self.z_hotend_location.get_write()
     }
 
     fn g0_1(&mut self, code: GCode) -> GCodeResult<Action> {
@@ -148,7 +173,7 @@ impl Decoder {
         let mut z = z.unwrap_or_default();
         let mut e = e.unwrap_or_default();
 
-        fn convert(new_coord: &mut f64, prog_coord: &mut f64) {
+        fn calc_rel(new_coord: &mut f64, prog_coord: &mut f64) {
             let rel_coord = *new_coord - *prog_coord;
             *prog_coord = *new_coord;
             *new_coord = rel_coord;
@@ -156,9 +181,9 @@ impl Decoder {
 
         // make x, y and z relative so we can calculate with them
         if self.xyz_coord_mode == CoordMode::Absolute {
-            convert(&mut x, &mut self.prog_x);
-            convert(&mut y, &mut self.prog_y);
-            convert(&mut z, &mut self.prog_z);
+            calc_rel(&mut x, &mut self.prog_x);
+            calc_rel(&mut y, &mut self.prog_y);
+            calc_rel(&mut z, &mut self.prog_z);
         } else {
             self.prog_x += x;
             self.prog_x += y;
@@ -166,28 +191,36 @@ impl Decoder {
         }
         // make e relative so we can calculate with it
         if self.e_coord_mode == CoordMode::Absolute {
-            convert(&mut e, &mut self.prog_e);
+            calc_rel(&mut e, &mut self.prog_e);
         } else {
             self.prog_e += e;
         }
 
         let cfg = self.settings.config();
 
+        let actual_x_new = self.actual_x + x;
+        let actual_y_new = self.actual_y + y;
+        let actual_z_new = self.actual_z + z;
+        // check lower limit
+        ensure_own!(actual_x_new >= 0.0, GCodeError::OutOfBounds(code));
+        ensure_own!(actual_y_new >= 0.0, GCodeError::OutOfBounds(code));
         ensure_own!(
-            self.actual_x + x <= cfg.motors.x.limit as f64,
+            actual_z_new >= self.z_hotend_location.read(),
+            GCodeError::OutOfBounds(code)
+        );
+        // check upper limits
+        ensure_own!(
+            actual_x_new <= cfg.motors.x.limit as f64,
             GCodeError::OutOfBounds(code)
         );
         ensure_own!(
-            self.actual_y + y <= cfg.motors.y.limit as f64,
+            actual_y_new <= cfg.motors.y.limit as f64,
             GCodeError::OutOfBounds(code)
         );
-        ensure_own!(
-            self.actual_z + z <= cfg.motors.z.limit as f64,
-            GCodeError::OutOfBounds(code)
-        );
-        self.actual_x += x;
-        self.actual_y += y;
-        self.actual_z += z;
+        ensure_own!(actual_z_new <= 0.0, GCodeError::OutOfBounds(code));
+        self.actual_x = actual_x_new;
+        self.actual_y = actual_y_new;
+        self.actual_z = actual_z_new;
 
         // save the feedrate for the next instructions
         // unfortunately this seems to be widely used in gcode
@@ -203,25 +236,10 @@ impl Decoder {
         // time in s
         let t = s / (f / 60.0);
         // distance in steps
-        // (distance_in_mm / translation) * (360/1.8) * microsteps_per_step
-        // conversion from StepMode to f64 can't happen directly so we have to
-        // do it this way
-        let x = ((x / cfg.motors.x.translation)
-            * (360.0 / 1.8)
-            * (cfg.motors.x.step_size as u8) as f64)
-            .round();
-        let y = ((y / cfg.motors.y.translation)
-            * (360.0 / 1.8)
-            * (cfg.motors.y.step_size as u8) as f64)
-            .round();
-        let z = ((z / cfg.motors.z.translation)
-            * (360.0 / 1.8)
-            * (cfg.motors.z.step_size as u8) as f64)
-            .round();
-        let e = ((e / cfg.motors.e.translation)
-            * (360.0 / 1.8)
-            * (cfg.motors.e.step_size as u8) as f64)
-            .round();
+        let x = mm_to_steps(x, &cfg.motors.x.translation, &cfg.motors.x.step_size);
+        let y = mm_to_steps(y, &cfg.motors.y.translation, &cfg.motors.y.step_size);
+        let z = mm_to_steps(z, &cfg.motors.z.translation, &cfg.motors.z.step_size);
+        let e = mm_to_steps(e, &cfg.motors.e.translation, &cfg.motors.e.step_size);
 
         // speed in steps/second
         // distance_in_steps / time
@@ -275,7 +293,7 @@ impl Decoder {
 
         self.steps_x += x as u32;
         self.steps_y += y as u32;
-        self.steps_z += z as u32;
+        self.steps_z += z as i32;
 
         let mut e_direction = cfg.motors.e.positive_direction;
         if e < 0.0 {
@@ -302,7 +320,7 @@ impl Decoder {
                 deceleration_jerk: j1_y as u32,
             },
             z: AxisMovement {
-                distance: self.steps_z as i32,
+                distance: self.steps_z,
                 min_frequency: 1,
                 max_frequency: v_z as u32,
                 acceleration: a0_z as u32,
