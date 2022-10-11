@@ -115,8 +115,8 @@ impl OnewayAtomicF64Read {
         ))))
     }
 
-    pub fn get_write(&self) -> OnewayAtomicF64Read {
-        OnewayAtomicF64Read(Arc::clone(&self.0))
+    pub fn get_write(&self) -> OnewayAtomicF64Write {
+        OnewayAtomicF64Write(Arc::clone(&self.0))
     }
 
     pub fn read(&self) -> f64 {
