@@ -209,11 +209,13 @@ impl PiThreadData {
     }
 
     pub fn update_hotend_heat(&self) -> Result<()> {
-        todo!()
+        // FIXME TODO
+        Ok(())
     }
 
     pub fn update_bed_heat(&self) -> Result<()> {
-        todo!()
+        // FIXME TODO
+        Ok(())
     }
 
     fn notify_waiting_target_changed<I: IntoIterator<Item = Sender<WaitTempComms>>>(waiting: I) {
