@@ -575,7 +575,7 @@ impl Decoder {
     fn m109(&mut self, code: GCode) -> GCodeResult<VecDeque<Action>> {
         assert_code!(code, Miscellaneous, 109, 0);
         let cfg = &self.settings.config().hotend;
-        self.hotend_target_temp = extract_temp_from_code(code, cfg.lower_limit, cfg.lower_limit)?;
+        self.hotend_target_temp = extract_temp_from_code(code, cfg.lower_limit, cfg.upper_limit)?;
         let mut dq = VecDeque::with_capacity(2);
         dq.push_back(Action::HotendTarget(self.hotend_target_temp));
         dq.push_back(Action::WaitHotendTarget);
