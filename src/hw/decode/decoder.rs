@@ -43,7 +43,11 @@ macro_rules! assert_code {
     };
 }
 
-fn extract_temp_from_code(code: GCode, limit: u16) -> GCodeResult<Option<u16>> {
+fn extract_temp_from_code(
+    code: GCode,
+    lower_limit: u16,
+    upper_limit: u16,
+) -> GCodeResult<Option<u16>> {
     ensure_own!(
         !code.arguments().is_empty(),
         GCodeError::MissingArguments(code)
@@ -59,8 +63,10 @@ fn extract_temp_from_code(code: GCode, limit: u16) -> GCodeResult<Option<u16>> {
         };
     }
     let temp = temp.unwrap();
-    // FIXME check lower limit
-    ensure_own!(temp <= limit, GCodeError::OutOfBounds(code));
+    ensure_own!(
+        lower_limit <= temp && temp <= upper_limit,
+        GCodeError::OutOfBounds(code)
+    );
     if temp == 0 {
         Ok(None)
     } else {
@@ -564,8 +570,8 @@ impl Decoder {
     /// Supported arguments: `S`
     fn m104(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, Miscellaneous, 104, 0);
-        self.hotend_target_temp =
-            extract_temp_from_code(code, self.settings.config().hotend.upper_limit)?;
+        let cfg = &self.settings.config().hotend;
+        self.hotend_target_temp = extract_temp_from_code(code, cfg.lower_limit, cfg.upper_limit)?;
         Ok(Action::HotendTarget(self.hotend_target_temp))
     }
 
@@ -574,8 +580,8 @@ impl Decoder {
     /// Supported arguments: `S`
     fn m109(&mut self, code: GCode) -> GCodeResult<VecDeque<Action>> {
         assert_code!(code, Miscellaneous, 109, 0);
-        self.hotend_target_temp =
-            extract_temp_from_code(code, self.settings.config().hotend.upper_limit)?;
+        let cfg = &self.settings.config().hotend;
+        self.hotend_target_temp = extract_temp_from_code(code, cfg.lower_limit, cfg.lower_limit)?;
         let mut dq = VecDeque::with_capacity(2);
         dq.push_back(Action::HotendTarget(self.hotend_target_temp));
         dq.push_back(Action::WaitHotendTarget);
@@ -587,8 +593,8 @@ impl Decoder {
     /// Supported arguments: `S`
     fn m140(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, Miscellaneous, 140, 0);
-        self.bed_target_temp =
-            extract_temp_from_code(code, self.settings.config().bed.upper_limit)?;
+        let cfg = &self.settings.config().bed;
+        self.bed_target_temp = extract_temp_from_code(code, cfg.lower_limit, cfg.upper_limit)?;
         Ok(Action::BedTarget(self.bed_target_temp))
     }
 
@@ -597,7 +603,8 @@ impl Decoder {
     /// Supported arguments: `S`
     fn m190(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, Miscellaneous, 190, 0);
-        let temp = extract_temp_from_code(code, self.settings.config().bed.upper_limit)?;
+        let cfg = &self.settings.config().bed;
+        let temp = extract_temp_from_code(code, cfg.lower_limit, cfg.upper_limit)?;
         Ok(Action::WaitBedMinTemp(temp))
     }
 
