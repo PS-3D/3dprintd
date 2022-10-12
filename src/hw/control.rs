@@ -4,7 +4,7 @@ use super::{
     state::{State, StateError, StateInfo},
 };
 use crate::{
-    comms::{Axis, ControlComms},
+    comms::{Axis, ControlComms, OnewayAtomicF64Read},
     util::ensure_own,
 };
 use anyhow::{ensure, Result};
@@ -38,6 +38,7 @@ pub struct HwCtrl {
     executor_manual_send: Sender<Action>,
     estop_send: Sender<ControlComms<EStopComms>>,
     oneway_pos_read: OnewayPosRead,
+    z_hotend_location: OnewayAtomicF64Read,
 }
 
 macro_rules! pos_info_axis {
@@ -55,6 +56,7 @@ impl HwCtrl {
         executor_manual_send: Sender<Action>,
         estop_send: Sender<ControlComms<EStopComms>>,
         oneway_pos_read: OnewayPosRead,
+        z_hotend_location: OnewayAtomicF64Read,
     ) -> Self {
         Self {
             state: Arc::new(RwLock::new(State::new())),
@@ -63,6 +65,7 @@ impl HwCtrl {
             executor_manual_send,
             estop_send,
             oneway_pos_read,
+            z_hotend_location,
         }
     }
 
@@ -70,19 +73,35 @@ impl HwCtrl {
         self.state.read().unwrap().info()
     }
 
-    pub fn pos_info(&self) -> PositionInfo {
-        (&self.oneway_pos_read).into()
-    }
-
     pos_info_axis!(pos_info_x, x);
     pos_info_axis!(pos_info_y, y);
-    pos_info_axis!(pos_info_z, z);
+
+    pub fn pos_info_z(&self) -> f64 {
+        self.oneway_pos_read.z.read() - self.z_hotend_location.read()
+    }
+
+    pub fn pos_info(&self) -> PositionInfo {
+        PositionInfo {
+            x: self.pos_info_x(),
+            y: self.pos_info_y(),
+            z: self.pos_info_z(),
+        }
+    }
 
     pub fn try_reference_axis(&self, axis: Axis) -> Result<(), StateError> {
         let state = self.state.read().unwrap();
         ensure_own!(state.is_stopped(), StateError::NotStopped);
         self.executor_manual_send
             .send(Action::ReferenceAxis(axis))
+            .unwrap();
+        Ok(())
+    }
+
+    pub fn try_reference_z_hotend(&self) -> Result<(), StateError> {
+        let state = self.state.read().unwrap();
+        ensure_own!(state.is_stopped(), StateError::NotStopped);
+        self.executor_manual_send
+            .send(Action::ReferenceZHotend)
             .unwrap();
         Ok(())
     }

@@ -6,7 +6,10 @@ use super::{
     comms::{Action, DecoderComms, ExecutorGCodeComms, GCodeSpan},
     state::StateError,
 };
-use crate::{comms::ControlComms, settings::Settings};
+use crate::{
+    comms::{ControlComms, OnewayAtomicF64Read},
+    settings::Settings,
+};
 use anyhow::{Context, Result};
 use crossbeam::{
     channel::{self, Receiver, Sender},
@@ -164,10 +167,10 @@ struct DecoderThread {
 }
 
 impl DecoderThread {
-    fn new(settings: Settings) -> Self {
+    fn new(settings: Settings, z_hotend_location: OnewayAtomicF64Read) -> Self {
         Self {
             state: Arc::new(RwLock::new(DecoderState::new())),
-            decoder: Arc::new(RwLock::new(InnerDecoder::new(settings))),
+            decoder: Arc::new(RwLock::new(InnerDecoder::new(settings, z_hotend_location))),
         }
     }
 
@@ -266,9 +269,12 @@ fn decoder_loop(decoder: DecoderThread, decoder_recv: Receiver<ControlComms<Deco
 }
 
 /// Starts the decode thread
-pub fn start(settings: Settings) -> (JoinHandle<()>, DecoderCtrl) {
+pub fn start(
+    settings: Settings,
+    z_hotend_location: OnewayAtomicF64Read,
+) -> (JoinHandle<()>, DecoderCtrl) {
     let (decoder_send, decoder_recv) = channel::unbounded();
-    let decoder_thread = DecoderThread::new(settings);
+    let decoder_thread = DecoderThread::new(settings, z_hotend_location);
     let decoder_ctrl = decoder_thread.get_ctrl(decoder_send);
     let handle = thread::spawn(move || decoder_loop(decoder_thread, decoder_recv));
     (handle, decoder_ctrl)

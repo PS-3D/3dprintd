@@ -3,7 +3,12 @@ mod motors;
 
 use self::{executor::Executor, motors::Motors};
 use super::comms::{Action, EStopComms, ExecutorCtrl};
-use crate::{comms::ControlComms, hw::comms::OnewayPosRead, settings::Settings, util::send_err};
+use crate::{
+    comms::{ControlComms, OnewayAtomicF64Read},
+    hw::comms::OnewayPosRead,
+    settings::Settings,
+    util::send_err,
+};
 use anyhow::{Context, Error, Result};
 use crossbeam::{
     channel::{self, Receiver, Sender, TryRecvError},
@@ -17,13 +22,11 @@ use std::{
 };
 
 fn executor_loop(
-    settings: Settings,
-    motors: Motors,
+    mut exec: Executor,
     executor_ctrl_recv: Receiver<ControlComms<ExecutorCtrl>>,
     executor_manual_recv: Receiver<Action>,
     error_send: Sender<ControlComms<Error>>,
 ) {
-    let mut exec = Executor::new(settings, motors);
     let mut gcode = None;
     // has to be macro so break will work
     macro_rules! handle_ctrl_msg {
@@ -87,7 +90,12 @@ pub fn start(
     executor_manual_recv: Receiver<Action>,
     estop_recv: Receiver<ControlComms<EStopComms>>,
     error_send: Sender<ControlComms<Error>>,
-) -> Result<(JoinHandle<()>, JoinHandle<()>, OnewayPosRead)> {
+) -> Result<(
+    JoinHandle<()>,
+    JoinHandle<()>,
+    OnewayPosRead,
+    OnewayAtomicF64Read,
+)> {
     let (setup_send, setup_recv) = channel::bounded(1);
     // do it this way all in the executorhread because we can't send motors between
     // threads. We then send the result of the setup via the above channel.
@@ -124,19 +132,17 @@ pub fn start(
         }
         match setup(&settings, estop_recv) {
             Ok((motors, estop_handle)) => {
+                let oneway_pos_read = OnewayPosRead {
+                    x: motors.x_pos_mm_read(),
+                    y: motors.y_pos_mm_read(),
+                    z: motors.z_pos_mm_read(),
+                };
+                let (executor, z_hotend_location) = Executor::new(settings, motors);
                 setup_send
-                    .send(Ok((
-                        estop_handle,
-                        OnewayPosRead {
-                            x: motors.x_pos_mm_read(),
-                            y: motors.y_pos_mm_read(),
-                            z: motors.z_pos_mm_read(),
-                        },
-                    )))
+                    .send(Ok((estop_handle, oneway_pos_read, z_hotend_location)))
                     .unwrap();
                 executor_loop(
-                    settings,
-                    motors,
+                    executor,
                     executor_ctrl_recv,
                     executor_manual_recv,
                     error_send,
@@ -147,6 +153,11 @@ pub fn start(
             }
         }
     });
-    let (estop_handle, oneway_data_read) = setup_recv.recv().unwrap()?;
-    Ok((executor_handle, estop_handle, oneway_data_read))
+    let (estop_handle, oneway_data_read, z_hotend_location) = setup_recv.recv().unwrap()?;
+    Ok((
+        executor_handle,
+        estop_handle,
+        oneway_data_read,
+        z_hotend_location,
+    ))
 }

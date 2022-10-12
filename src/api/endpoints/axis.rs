@@ -223,11 +223,12 @@ pub fn post_axis_z_reference(
     hw_ctrl: &State<HwCtrl>,
 ) -> ApiPostAxisReferenceResponse {
     let direction = json_ok_or!(direction, ApiPostAxisReferenceResponse::InvalidInput(()));
-    match direction {
-        ApiPostAxisZReferenceDirection::Endstop => match hw_ctrl.try_reference_axis(Axis::Z) {
-            Ok(_) => ApiPostAxisReferenceResponse::Accepted(()),
-            Err(_) => ApiPostAxisReferenceResponse::StateError(()),
-        },
-        ApiPostAxisZReferenceDirection::Hotend => todo!(),
+    let res = match direction {
+        ApiPostAxisZReferenceDirection::Endstop => hw_ctrl.try_reference_axis(Axis::Z),
+        ApiPostAxisZReferenceDirection::Hotend => hw_ctrl.try_reference_z_hotend(),
+    };
+    match res {
+        Ok(_) => ApiPostAxisReferenceResponse::Accepted(()),
+        Err(_) => ApiPostAxisReferenceResponse::StateError(()),
     }
 }

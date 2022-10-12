@@ -69,4 +69,9 @@ impl OnewayAtomicF64Write {
         self.0
             .store(u64::from_ne_bytes(val.to_ne_bytes()), Ordering::Release)
     }
+
+    pub fn read(&self) -> f64 {
+        // FIXME maybe use Ordering::Relaxed since it doesn't really matter?
+        f64::from_ne_bytes(self.0.load(Ordering::Acquire).to_ne_bytes())
+    }
 }

@@ -99,6 +99,10 @@ impl Motors {
         Ok(motors)
     }
 
+    pub fn z_pos_mm(&self) -> f64 {
+        self.z.pos_mm.read()
+    }
+
     pub fn x_pos_mm_read(&self) -> OnewayAtomicF64Read {
         self.x.pos_mm.get_read()
     }

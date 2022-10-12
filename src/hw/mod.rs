@@ -22,20 +22,21 @@ pub fn start(
     let (estop_send, estop_recv) = channel::unbounded();
     let (executor_ctrl_send, executor_ctrl_recv) = channel::unbounded();
     let (executor_manual_send, executor_manual_recv) = channel::unbounded();
-    let (executor_handle, estop_handle, oneway_pos_read) = execute::start(
+    let (executor_handle, estop_handle, oneway_pos_read, z_hotend_location) = execute::start(
         settings.clone(),
         executor_ctrl_recv,
         executor_manual_recv,
         estop_recv,
         error_send.clone(),
     )?;
-    let (decoder_handle, decoder_ctrl) = decode::start(settings);
+    let (decoder_handle, decoder_ctrl) = decode::start(settings, z_hotend_location.clone());
     let hw_ctrl = HwCtrl::new(
         decoder_ctrl,
         executor_ctrl_send,
         executor_manual_send,
         estop_send,
         oneway_pos_read,
+        z_hotend_location,
     );
     Ok((executor_handle, estop_handle, decoder_handle, hw_ctrl))
 }

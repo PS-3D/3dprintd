@@ -113,8 +113,8 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    pub fn new(settings: Settings) -> Self {
-        let actual_z = -(settings.config().motors.z.limit as f64);
+    pub fn new(settings: Settings, z_hotend_location: OnewayAtomicF64Read) -> Self {
+        let actual_z = z_hotend_location.read();
         let steps_z = mm_to_steps(
             actual_z,
             &settings.config().motors.z.translation,
