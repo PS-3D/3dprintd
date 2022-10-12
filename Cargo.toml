@@ -9,6 +9,12 @@ edition = "2021"
 name = "ps3dprintd"
 path = "src/main.rs"
 
+[profile.dev]
+panic = 'abort'
+
+[profile.release]
+panic = 'abort'
+
 [dependencies]
 # chose 5 instead of 4 even tho 5 isn't out yet due to 5 having an option
 # to shutdown rocket properly and not just killing the process
