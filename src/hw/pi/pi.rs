@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use revpi::revpi_from_json;
 
 revpi_from_json!(InnerRevPi, "config.rsc");
@@ -12,7 +12,7 @@ pub struct RevPi {
 impl RevPi {
     pub fn new() -> Result<Self> {
         Ok(Self {
-            inner: InnerRevPi::new()?,
+            inner: InnerRevPi::new().context("Opening /dev/piControl0 failed")?,
         })
     }
 
