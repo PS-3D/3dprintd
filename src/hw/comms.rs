@@ -50,10 +50,11 @@ pub enum Action {
     ReferenceAll,
     ReferenceAxis(Axis),
     ReferenceZHotend,
-    HotendTemp(Option<u32>),
-    BedTemp(Option<u32>),
-    WaitHotendTemp(Option<u32>),
-    WaitBedTemp(Option<u32>),
+    HotendTarget(Option<u16>),
+    BedTarget(Option<u16>),
+    WaitHotendTarget,
+    WaitBedTarget,
+    WaitBedMinTemp(Option<u16>),
     Wait(Duration),
 }
 

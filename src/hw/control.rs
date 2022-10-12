@@ -1,6 +1,7 @@
 use super::{
     comms::{Action, EStopComms, ExecutorCtrl, OnewayPosRead},
     decode::DecoderCtrl,
+    pi::PiCtrl,
     state::{State, StateError, StateInfo},
 };
 use crate::{
@@ -34,6 +35,7 @@ impl From<&OnewayPosRead> for PositionInfo {
 pub struct HwCtrl {
     state: Arc<RwLock<State>>,
     decoder_ctrl: DecoderCtrl,
+    pi_ctrl: PiCtrl,
     executor_ctrl_send: Sender<ControlComms<ExecutorCtrl>>,
     executor_manual_send: Sender<Action>,
     estop_send: Sender<ControlComms<EStopComms>>,
@@ -52,6 +54,7 @@ macro_rules! pos_info_axis {
 impl HwCtrl {
     pub(super) fn new(
         decoder_ctrl: DecoderCtrl,
+        pi_ctrl: PiCtrl,
         executor_ctrl_send: Sender<ControlComms<ExecutorCtrl>>,
         executor_manual_send: Sender<Action>,
         estop_send: Sender<ControlComms<EStopComms>>,
@@ -66,6 +69,7 @@ impl HwCtrl {
             estop_send,
             oneway_pos_read,
             z_hotend_location,
+            pi_ctrl,
         }
     }
 
@@ -158,9 +162,10 @@ impl HwCtrl {
             .unwrap()
     }
 
-    pub fn exit(&self) {
+    pub fn exit(self) {
         self.decoder_ctrl.exit();
         self.executor_ctrl_send.send(ControlComms::Exit).unwrap();
         self.estop_send.send(ControlComms::Exit).unwrap();
+        self.pi_ctrl.exit();
     }
 }

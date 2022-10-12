@@ -2,7 +2,10 @@ mod executor;
 mod motors;
 
 use self::{executor::Executor, motors::Motors};
-use super::comms::{Action, EStopComms, ExecutorCtrl};
+use super::{
+    comms::{Action, EStopComms, ExecutorCtrl},
+    pi::PiCtrl,
+};
 use crate::{
     comms::{ControlComms, OnewayAtomicF64Read},
     hw::comms::OnewayPosRead,
@@ -86,6 +89,7 @@ fn executor_loop(
 
 pub fn start(
     settings: Settings,
+    pi_ctrl: PiCtrl,
     executor_ctrl_recv: Receiver<ControlComms<ExecutorCtrl>>,
     executor_manual_recv: Receiver<Action>,
     estop_recv: Receiver<ControlComms<EStopComms>>,
@@ -137,7 +141,7 @@ pub fn start(
                     y: motors.y_pos_mm_read(),
                     z: motors.z_pos_mm_read(),
                 };
-                let (executor, z_hotend_location) = Executor::new(settings, motors);
+                let (executor, z_hotend_location) = Executor::new(settings, motors, pi_ctrl);
                 setup_send
                     .send(Ok((estop_handle, oneway_pos_read, z_hotend_location)))
                     .unwrap();

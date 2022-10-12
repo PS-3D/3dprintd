@@ -43,7 +43,7 @@ macro_rules! assert_code {
     };
 }
 
-fn extract_temp_from_code(code: GCode, limit: u32) -> GCodeResult<Option<u32>> {
+fn extract_temp_from_code(code: GCode, limit: u16) -> GCodeResult<Option<u16>> {
     ensure_own!(
         !code.arguments().is_empty(),
         GCodeError::MissingArguments(code)
@@ -53,12 +53,13 @@ fn extract_temp_from_code(code: GCode, limit: u32) -> GCodeResult<Option<u32>> {
         match arg.letter {
             'S' => {
                 ensure_own!(temp.is_none(), GCodeError::DuplicateArgument(*arg, code));
-                temp = Some(arg.value as u32)
+                temp = Some(arg.value as u16)
             }
             _ => bail_own!(GCodeError::UnknownArgument(*arg, code)),
         };
     }
     let temp = temp.unwrap();
+    // FIXME check lower limit
     ensure_own!(temp <= limit, GCodeError::OutOfBounds(code));
     if temp == 0 {
         Ok(None)
@@ -107,8 +108,8 @@ pub struct Decoder {
     xyz_coord_mode: CoordMode,
     e_coord_mode: CoordMode,
     unit: Unit,
-    hotend_target_temp: Option<u32>,
-    bed_target_temp: Option<u32>,
+    hotend_target_temp: Option<u16>,
+    bed_target_temp: Option<u16>,
     z_hotend_location: OnewayAtomicF64Read,
 }
 
@@ -564,8 +565,8 @@ impl Decoder {
     fn m104(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, Miscellaneous, 104, 0);
         self.hotend_target_temp =
-            extract_temp_from_code(code, self.settings.config().hotend.limit)?;
-        Ok(Action::HotendTemp(self.hotend_target_temp))
+            extract_temp_from_code(code, self.settings.config().hotend.upper_limit)?;
+        Ok(Action::HotendTarget(self.hotend_target_temp))
     }
 
     /// Executes M109 command
@@ -574,10 +575,10 @@ impl Decoder {
     fn m109(&mut self, code: GCode) -> GCodeResult<VecDeque<Action>> {
         assert_code!(code, Miscellaneous, 109, 0);
         self.hotend_target_temp =
-            extract_temp_from_code(code, self.settings.config().hotend.limit)?;
+            extract_temp_from_code(code, self.settings.config().hotend.upper_limit)?;
         let mut dq = VecDeque::with_capacity(2);
-        dq.push_back(Action::HotendTemp(self.hotend_target_temp));
-        dq.push_back(Action::WaitHotendTemp(self.hotend_target_temp));
+        dq.push_back(Action::HotendTarget(self.hotend_target_temp));
+        dq.push_back(Action::WaitHotendTarget);
         Ok(dq)
     }
 
@@ -586,8 +587,9 @@ impl Decoder {
     /// Supported arguments: `S`
     fn m140(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, Miscellaneous, 140, 0);
-        self.bed_target_temp = extract_temp_from_code(code, self.settings.config().bed.limit)?;
-        Ok(Action::BedTemp(self.bed_target_temp))
+        self.bed_target_temp =
+            extract_temp_from_code(code, self.settings.config().bed.upper_limit)?;
+        Ok(Action::BedTarget(self.bed_target_temp))
     }
 
     /// Executes M190 command
@@ -595,8 +597,8 @@ impl Decoder {
     /// Supported arguments: `S`
     fn m190(&mut self, code: GCode) -> GCodeResult<Action> {
         assert_code!(code, Miscellaneous, 190, 0);
-        let temp = extract_temp_from_code(code, self.settings.config().bed.limit)?;
-        Ok(Action::WaitBedTemp(temp))
+        let temp = extract_temp_from_code(code, self.settings.config().bed.upper_limit)?;
+        Ok(Action::WaitBedMinTemp(temp))
     }
 
     // Necessary GCode TODO:
