@@ -6,12 +6,16 @@ use crate::{
     comms::{OnewayAtomicF64Read, OnewayAtomicF64Write, ReferenceRunOptParameters},
     settings::{Config, Settings},
 };
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
+#[cfg(not(feature = "dev_no_motors"))]
+use nanotec_stepper_driver::EStop;
 use nanotec_stepper_driver::{
     AllMotor, Driver, DriverError, Ignore, LimitSwitchBehavior, Motor, MotorStatus,
     PositioningMode, Repetitions, RespondMode, ResponseHandle, RotationDirection, SendAutoStatus,
 };
+use std::time::Duration;
 
+#[cfg(not(feature = "dev_no_motors"))]
 struct AxisMotorWrap {
     motor: Motor<SendAutoStatus>,
     pos_mm: OnewayAtomicF64Write,
@@ -23,7 +27,9 @@ struct AxisMotorWrap {
 //
 // => no move allowed when state is invalid, only reference can fix that. if that
 //    fails, keep state invalid
+#[cfg(not(feature = "dev_no_motors"))]
 pub struct Motors {
+    settings: Settings,
     all: AllMotor,
     x: AxisMotorWrap,
     y: AxisMotorWrap,
@@ -57,9 +63,15 @@ macro_rules! make_reference_motor {
     };
 }
 
+#[cfg(not(feature = "dev_no_motors"))]
 impl Motors {
-    pub fn init(settings: &Settings, mut driver: Driver) -> Result<Self> {
+    pub fn new(settings: Settings) -> Result<(Self, EStop)> {
         let cfg = settings.config();
+        let iface = serialport::new(cfg.motors.port.as_str(), cfg.motors.baud_rate)
+            .timeout(Duration::from_secs(cfg.motors.timeout))
+            .open()
+            .context("Serialport to the motors couldn't be opened")?;
+        let mut driver = Driver::new(iface)?;
         let all = driver.add_all_motor().expect("adding AllMotor failed");
         let x = driver
             .add_motor(cfg.motors.x.address, RespondMode::NotQuiet)
@@ -73,23 +85,13 @@ impl Motors {
         let e = driver
             .add_motor(cfg.motors.e.address, RespondMode::NotQuiet)
             .expect("adding e axis motor failed");
-        let mut x = x.start_sending_auto_status().ignore()?.wait().ignore()?;
-        let mut y = y.start_sending_auto_status().ignore()?.wait().ignore()?;
-        let mut z = z.start_sending_auto_status().ignore()?.wait().ignore()?;
-        let mut e = e.start_sending_auto_status().ignore()?.wait().ignore()?;
-        x.set_quickstop_ramp_no_conversion(cfg.motors.x.quickstop_ramp)?
-            .wait()
-            .ignore()?;
-        y.set_quickstop_ramp_no_conversion(cfg.motors.y.quickstop_ramp)?
-            .wait()
-            .ignore()?;
-        z.set_accel_ramp_no_conversion(cfg.motors.z.quickstop_ramp)?
-            .wait()
-            .ignore()?;
-        e.set_accel_ramp_no_conversion(cfg.motors.e.quickstop_ramp)?
-            .wait()
-            .ignore()?;
-        let motors = Motors {
+        let x = x.start_sending_auto_status().ignore()?.wait().ignore()?;
+        let y = y.start_sending_auto_status().ignore()?.wait().ignore()?;
+        let z = z.start_sending_auto_status().ignore()?.wait().ignore()?;
+        let e = e.start_sending_auto_status().ignore()?.wait().ignore()?;
+        let estop = driver.new_estop();
+        let motors = Self {
+            settings,
             all,
             x: AxisMotorWrap {
                 motor: x,
@@ -105,8 +107,32 @@ impl Motors {
             },
             e,
         };
+        Ok((motors, estop))
+    }
+
+    pub fn init(&mut self) -> Result<()> {
+        let cfg = self.settings.config();
+        self.x
+            .motor
+            .set_quickstop_ramp_no_conversion(cfg.motors.x.quickstop_ramp)?
+            .wait()
+            .ignore()?;
+        self.y
+            .motor
+            .set_quickstop_ramp_no_conversion(cfg.motors.y.quickstop_ramp)?
+            .wait()
+            .ignore()?;
+        self.z
+            .motor
+            .set_accel_ramp_no_conversion(cfg.motors.z.quickstop_ramp)?
+            .wait()
+            .ignore()?;
+        self.e
+            .set_accel_ramp_no_conversion(cfg.motors.e.quickstop_ramp)?
+            .wait()
+            .ignore()?;
         // FIXME init positioningmode, turningdirection, etc.
-        Ok(motors)
+        Ok(())
     }
 
     pub fn z_pos_mm(&self) -> f64 {
@@ -312,5 +338,84 @@ impl Motors {
             }
             Err(me.into())
         }
+    }
+}
+
+#[cfg(feature = "dev_no_motors")]
+pub struct EStop {}
+
+#[cfg(feature = "dev_no_motors")]
+impl EStop {
+    pub fn estop(&mut self, millis: u64) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(feature = "dev_no_motors")]
+pub struct Motors {
+    x_pos_mm: OnewayAtomicF64Write,
+    y_pos_mm: OnewayAtomicF64Write,
+    z_pos_mm: OnewayAtomicF64Write,
+}
+
+#[cfg(feature = "dev_no_motors")]
+impl Motors {
+    pub fn new(settings: Settings) -> Result<(Self, EStop)> {
+        Ok((
+            Self {
+                x_pos_mm: OnewayAtomicF64Write::new(0.0),
+                y_pos_mm: OnewayAtomicF64Write::new(0.0),
+                z_pos_mm: OnewayAtomicF64Write::new(0.0),
+            },
+            EStop {},
+        ))
+    }
+
+    pub fn init(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn z_pos_mm(&self) -> f64 {
+        self.z_pos_mm.read()
+    }
+
+    pub fn x_pos_mm_read(&self) -> OnewayAtomicF64Read {
+        self.x_pos_mm.get_read()
+    }
+
+    pub fn y_pos_mm_read(&self) -> OnewayAtomicF64Read {
+        self.y_pos_mm.get_read()
+    }
+
+    pub fn z_pos_mm_read(&self) -> OnewayAtomicF64Read {
+        self.z_pos_mm.get_read()
+    }
+
+    pub fn reference_x(
+        &mut self,
+        settings: &Settings,
+        params: ReferenceRunOptParameters,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn reference_y(
+        &mut self,
+        settings: &Settings,
+        params: ReferenceRunOptParameters,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn reference_z(
+        &mut self,
+        settings: &Settings,
+        params: ReferenceRunOptParameters,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn move_all(&mut self, m: &Movement, config: &Config) -> Result<()> {
+        Ok(())
     }
 }

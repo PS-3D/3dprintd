@@ -12,16 +12,14 @@ use crate::{
     settings::Settings,
     util::send_err,
 };
-use anyhow::{Context, Error, Result};
+use anyhow::{Error, Result};
 use crossbeam::{
     channel::{self, Receiver, Sender, TryRecvError},
     select,
 };
-use nanotec_stepper_driver::Driver;
 use std::{
     sync::atomic::Ordering,
     thread::{self, JoinHandle},
-    time::Duration,
 };
 
 fn executor_loop(
@@ -109,13 +107,7 @@ pub fn start(
             settings: &Settings,
             estop_recv: Receiver<ControlComms<EStopComms>>,
         ) -> Result<(Motors, JoinHandle<()>)> {
-            let cfg = settings.config();
-            let iface = serialport::new(cfg.motors.port.as_str(), cfg.motors.baud_rate)
-                .timeout(Duration::from_secs(cfg.motors.timeout))
-                .open()
-                .context("Serialport to the motors couldn't be opened")?;
-            let driver = Driver::new(iface)?;
-            let mut estop = driver.new_estop();
+            let (mut motors, mut estop) = Motors::new(settings.clone())?;
             let estop_handle = thread::spawn(move || {
                 loop {
                     match estop_recv
@@ -131,7 +123,7 @@ pub fn start(
                     }
                 }
             });
-            let motors = Motors::init(&settings, driver)?;
+            motors.init()?;
             Ok((motors, estop_handle))
         }
         match setup(&settings, estop_recv) {
