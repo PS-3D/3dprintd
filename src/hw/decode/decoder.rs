@@ -63,13 +63,13 @@ fn extract_temp_from_code(
         };
     }
     let temp = temp.unwrap();
-    ensure_own!(
-        lower_limit <= temp && temp <= upper_limit,
-        GCodeError::OutOfBounds(code)
-    );
     if temp == 0 {
         Ok(None)
     } else {
+        ensure_own!(
+            lower_limit <= temp && temp <= upper_limit,
+            GCodeError::OutOfBounds(code)
+        );
         Ok(Some(temp))
     }
 }
