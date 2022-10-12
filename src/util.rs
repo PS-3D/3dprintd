@@ -3,7 +3,7 @@ macro_rules! send_err {
         match $result {
             Ok(r) => r,
             Err(e) => $err_channel
-                .send(crate::comms::ControlComms::Msg(e))
+                .send(crate::comms::ControlComms::Msg(e.into()))
                 .unwrap(),
         }
     }};
