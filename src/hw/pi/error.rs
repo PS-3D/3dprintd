@@ -13,7 +13,7 @@ pub enum WaitTempError {
 /// Since that is kinda critical, we want to e.g. try and turn off the bed, even
 /// tho trying to turn off the hotend failed
 #[derive(Debug, Error)]
-pub struct ExitError(Vec<Error>);
+pub struct ExitError(pub Vec<Error>);
 
 impl Display for ExitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
