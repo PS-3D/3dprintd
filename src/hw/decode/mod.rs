@@ -272,10 +272,13 @@ fn decoder_loop(decoder: DecoderThread, decoder_recv: Receiver<ControlComms<Deco
 pub fn start(
     settings: Settings,
     z_hotend_location: OnewayAtomicF64Read,
-) -> (JoinHandle<()>, DecoderCtrl) {
+) -> Result<(JoinHandle<()>, DecoderCtrl)> {
     let (decoder_send, decoder_recv) = channel::unbounded();
     let decoder_thread = DecoderThread::new(settings, z_hotend_location);
     let decoder_ctrl = decoder_thread.get_ctrl(decoder_send);
-    let handle = thread::spawn(move || decoder_loop(decoder_thread, decoder_recv));
-    (handle, decoder_ctrl)
+    let handle = thread::Builder::new()
+        .name(String::from("decoder"))
+        .spawn(move || decoder_loop(decoder_thread, decoder_recv))
+        .context("Creating the decoder thread failed")?;
+    Ok((handle, decoder_ctrl))
 }

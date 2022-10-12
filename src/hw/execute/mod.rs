@@ -12,7 +12,7 @@ use crate::{
     settings::Settings,
     util::send_err,
 };
-use anyhow::{Error, Result};
+use anyhow::{Context, Error, Result};
 use crossbeam::{
     channel::{self, Receiver, Sender, TryRecvError},
     select,
@@ -102,53 +102,59 @@ pub fn start(
     // do it this way all in the executorhread because we can't send motors between
     // threads. We then send the result of the setup via the above channel.
     // the setup is all in a function so we can use the ? operator for convenience
-    let executor_handle = thread::spawn(move || {
-        fn setup(
-            settings: &Settings,
-            estop_recv: Receiver<ControlComms<EStopComms>>,
-        ) -> Result<(Motors, JoinHandle<()>)> {
-            let (mut motors, mut estop) = Motors::new(settings.clone())?;
-            let estop_handle = thread::spawn(move || {
-                loop {
-                    match estop_recv
-                        .recv()
-                        .expect("estop channel was unexpectedly closed")
-                    {
-                        // if there's an IO error writing, it's probably a good plan to
-                        // panic
-                        ControlComms::Msg(m) => match m {
-                            EStopComms::EStop => estop.estop(2000).unwrap(),
-                        },
-                        ControlComms::Exit => break,
-                    }
+    let executor_handle = thread::Builder::new()
+        .name(String::from("executor"))
+        .spawn(move || {
+            fn setup(
+                settings: &Settings,
+                estop_recv: Receiver<ControlComms<EStopComms>>,
+            ) -> Result<(Motors, JoinHandle<()>)> {
+                let (mut motors, mut estop) = Motors::new(settings.clone())?;
+                let estop_handle = thread::Builder::new()
+                    .name(String::from("estop"))
+                    .spawn(move || {
+                        loop {
+                            match estop_recv
+                                .recv()
+                                .expect("estop channel was unexpectedly closed")
+                            {
+                                // if there's an IO error writing, it's probably a good plan to
+                                // panic
+                                ControlComms::Msg(m) => match m {
+                                    EStopComms::EStop => estop.estop(2000).unwrap(),
+                                },
+                                ControlComms::Exit => break,
+                            }
+                        }
+                    })
+                    .context("Creating the estop thread failed")?;
+                motors.init()?;
+                Ok((motors, estop_handle))
+            }
+            match setup(&settings, estop_recv) {
+                Ok((motors, estop_handle)) => {
+                    let oneway_pos_read = OnewayPosRead {
+                        x: motors.x_pos_mm_read(),
+                        y: motors.y_pos_mm_read(),
+                        z: motors.z_pos_mm_read(),
+                    };
+                    let (executor, z_hotend_location) = Executor::new(settings, motors, pi_ctrl);
+                    setup_send
+                        .send(Ok((estop_handle, oneway_pos_read, z_hotend_location)))
+                        .unwrap();
+                    executor_loop(
+                        executor,
+                        executor_ctrl_recv,
+                        executor_manual_recv,
+                        error_send,
+                    );
                 }
-            });
-            motors.init()?;
-            Ok((motors, estop_handle))
-        }
-        match setup(&settings, estop_recv) {
-            Ok((motors, estop_handle)) => {
-                let oneway_pos_read = OnewayPosRead {
-                    x: motors.x_pos_mm_read(),
-                    y: motors.y_pos_mm_read(),
-                    z: motors.z_pos_mm_read(),
-                };
-                let (executor, z_hotend_location) = Executor::new(settings, motors, pi_ctrl);
-                setup_send
-                    .send(Ok((estop_handle, oneway_pos_read, z_hotend_location)))
-                    .unwrap();
-                executor_loop(
-                    executor,
-                    executor_ctrl_recv,
-                    executor_manual_recv,
-                    error_send,
-                );
+                Err(e) => {
+                    setup_send.send(Err(e)).unwrap();
+                }
             }
-            Err(e) => {
-                setup_send.send(Err(e)).unwrap();
-            }
-        }
-    });
+        })
+        .context("Creating the executor thread failed")?;
     let (estop_handle, oneway_data_read, z_hotend_location) = setup_recv.recv().unwrap()?;
     Ok((
         executor_handle,

@@ -1,5 +1,5 @@
 use crate::comms::ControlComms;
-use anyhow::Error;
+use anyhow::{Context, Error, Result};
 use crossbeam::channel::Receiver;
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -113,17 +113,20 @@ impl Errors {
     }
 }
 
-pub fn start(error_recv: Receiver<ControlComms<Error>>) -> (JoinHandle<()>, Errors) {
+pub fn start(error_recv: Receiver<ControlComms<Error>>) -> Result<(JoinHandle<()>, Errors)> {
     let errors = Errors::new();
     let errors_clone = errors.clone();
-    let handle = thread::spawn(move || loop {
-        match error_recv.recv().unwrap() {
-            ControlComms::Msg(e) => {
-                error!("{}", e);
-                errors.insert(e);
+    let handle = thread::Builder::new()
+        .name(String::from("error"))
+        .spawn(move || loop {
+            match error_recv.recv().unwrap() {
+                ControlComms::Msg(e) => {
+                    error!("{}", e);
+                    errors.insert(e);
+                }
+                ControlComms::Exit => break,
             }
-            ControlComms::Exit => break,
-        }
-    });
-    (handle, errors_clone)
+        })
+        .context("Creating the error thread failed")?;
+    Ok((handle, errors_clone))
 }

@@ -8,7 +8,7 @@ use crate::{
     settings::Settings,
     util::{ensure_own, send_err},
 };
-use anyhow::{Error, Result};
+use anyhow::{Context, Error, Result};
 use crossbeam::channel::{self, Receiver, Sender, TryRecvError};
 use std::{
     collections::BTreeMap,
@@ -333,6 +333,9 @@ pub fn start(
     let (pi_send, pi_recv) = channel::unbounded();
     let pi_thread_data = PiThreadData::new()?;
     let pi_ctrl = pi_thread_data.get_ctrl(settings.clone(), pi_send);
-    let handle = thread::spawn(move || pi_loop(settings, pi_thread_data, pi_recv, error_send));
+    let handle = thread::Builder::new()
+        .name(String::from("pi"))
+        .spawn(move || pi_loop(settings, pi_thread_data, pi_recv, error_send))
+        .context("Creating the pi thread failed")?;
     Ok((handle, pi_ctrl))
 }

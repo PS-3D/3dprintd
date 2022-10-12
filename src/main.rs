@@ -49,7 +49,7 @@ fn main() -> Result<()> {
         .init();
     let settings = settings::settings()?;
     let (error_send, error_recv) = channel::unbounded();
-    let (error_handle, errors) = api::values::start(error_recv);
+    let (error_handle, errors) = api::values::start(error_recv)?;
     let (pi_handle, executor_handle, estop_handle, decoder_handle, hw_ctrl) =
         hw::start(settings.clone(), error_send.clone())?;
     api::launch(settings.clone(), errors, hw_ctrl.clone())?;
