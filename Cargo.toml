@@ -15,6 +15,15 @@ panic = 'abort'
 [profile.release]
 panic = 'abort'
 
+[features]
+# these features are there to allow at least partially running the binary on
+# systems which don't have motors connected or the revpi driver.
+# They are intended for development only and the binary will only be partially
+# functional when they are enabled
+# DON'T USE THEM IN RELEASE
+dev_no_motors = []
+dev_no_pi = []
+
 [dependencies]
 # chose 5 instead of 4 even tho 5 isn't out yet due to 5 having an option
 # to shutdown rocket properly and not just killing the process

@@ -3,10 +3,12 @@ use revpi::revpi_from_json;
 
 revpi_from_json!(InnerRevPi, "config.rsc");
 
+#[cfg(not(feature = "dev_no_pi"))]
 pub struct RevPi {
     inner: InnerRevPi,
 }
 
+#[cfg(not(feature = "dev_no_pi"))]
 impl RevPi {
     pub fn new() -> Result<Self> {
         Ok(Self {
@@ -48,5 +50,49 @@ impl RevPi {
 
     pub fn read_bed_temp(&self) -> f64 {
         todo!()
+    }
+}
+
+#[cfg(feature = "dev_no_pi")]
+pub struct RevPi {}
+
+#[cfg(feature = "dev_no_pi")]
+impl RevPi {
+    pub fn new() -> Result<Self> {
+        Ok(Self {})
+    }
+
+    pub fn write_hotend_heat(&self, state: bool) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn write_hotend_fan(&self, state: bool) {}
+
+    pub fn write_bed_heat(&self, state: bool) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn read_x_endstop(&self) -> Result<bool> {
+        Ok(false)
+    }
+
+    pub fn read_y_endstop(&self) -> Result<bool> {
+        Ok(false)
+    }
+
+    pub fn read_z_endstop(&self) -> Result<bool> {
+        Ok(false)
+    }
+
+    pub fn read_estop(&self) -> Result<bool> {
+        Ok(false)
+    }
+
+    pub fn read_hotend_temp(&self) -> f64 {
+        42.0
+    }
+
+    pub fn read_bed_temp(&self) -> f64 {
+        42.0
     }
 }
