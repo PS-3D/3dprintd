@@ -75,9 +75,29 @@ impl From<Api> for RocketConfig {
 //
 
 #[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct Pi {
+    // interval in which to check the values in milliseconds
+    pub check_interval: u64,
+}
+
+impl Default for Pi {
+    fn default() -> Self {
+        Self { check_interval: 1 }
+    }
+}
+
+//
+
+#[derive(Debug, Deserialize)]
 pub struct Hotend {
     // temp limit in Celsius
-    pub limit: u32,
+    pub upper_limit: u16,
+    // temp limit in Celsius
+    // should be somewhere around 40, since temperatures below that might
+    // be reached naturally and as such might lead to problems
+    // FIXME maybe add default?
+    pub lower_limit: u16,
 }
 
 //
@@ -85,7 +105,12 @@ pub struct Hotend {
 #[derive(Debug, Deserialize)]
 pub struct Bed {
     // temp limit in Celsius
-    pub limit: u32,
+    pub upper_limit: u16,
+    // lower templimit in Celsius
+    // should be somewhere around 40, since temperatures below that might
+    // be reached naturally and as such might lead to problems
+    // FIXME maybe add default?
+    pub lower_limit: u16,
 }
 
 //
@@ -97,6 +122,8 @@ pub struct Config {
     #[serde(default)]
     pub api: Api,
     pub motors: Motors,
+    #[serde(default)]
+    pub pi: Pi,
     pub hotend: Hotend,
     pub bed: Bed,
 }
