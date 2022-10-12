@@ -14,7 +14,9 @@ pub enum GCodeError {
     #[error("duplicate argument {} in code {}", .0, .1)]
     DuplicateArgument(Word, GCode),
     #[error("code {} would cause the printer to go out of bounds", .0)]
-    OutOfBounds(GCode),
+    PosOutOfBounds(GCode),
+    #[error("code {} isn't inside the allowed temperature range, must be inside [{};{}]", .0, .1, .2)]
+    TempOutOfBounds(GCode, u16, u16),
 }
 
 #[derive(Debug, Error)]

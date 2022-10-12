@@ -68,7 +68,7 @@ fn extract_temp_from_code(
     } else {
         ensure_own!(
             lower_limit <= temp && temp <= upper_limit,
-            GCodeError::OutOfBounds(code)
+            GCodeError::TempOutOfBounds(code, lower_limit, upper_limit)
         );
         Ok(Some(temp))
     }
@@ -196,22 +196,22 @@ impl Decoder {
         let actual_y_new = self.actual_y + y;
         let actual_z_new = self.actual_z + z;
         // check lower limit
-        ensure_own!(actual_x_new >= 0.0, GCodeError::OutOfBounds(code));
-        ensure_own!(actual_y_new >= 0.0, GCodeError::OutOfBounds(code));
+        ensure_own!(actual_x_new >= 0.0, GCodeError::PosOutOfBounds(code));
+        ensure_own!(actual_y_new >= 0.0, GCodeError::PosOutOfBounds(code));
         ensure_own!(
             actual_z_new >= self.z_hotend_location.read(),
-            GCodeError::OutOfBounds(code)
+            GCodeError::PosOutOfBounds(code)
         );
         // check upper limits
         ensure_own!(
             actual_x_new <= cfg.motors.x.limit as f64,
-            GCodeError::OutOfBounds(code)
+            GCodeError::PosOutOfBounds(code)
         );
         ensure_own!(
             actual_y_new <= cfg.motors.y.limit as f64,
-            GCodeError::OutOfBounds(code)
+            GCodeError::PosOutOfBounds(code)
         );
-        ensure_own!(actual_z_new <= 0.0, GCodeError::OutOfBounds(code));
+        ensure_own!(actual_z_new <= 0.0, GCodeError::PosOutOfBounds(code));
         self.actual_x = actual_x_new;
         self.actual_y = actual_y_new;
         self.actual_z = actual_z_new;
