@@ -1,4 +1,4 @@
-use crate::comms::{Axis, ControlComms, OnewayAtomicF64Read};
+use crate::comms::{Axis, ControlComms, OnewayAtomicF64Read, ReferenceRunOptParameters};
 use crossbeam::channel::{Receiver, Sender};
 use gcode::Span as InnerSpan;
 use nanotec_stepper_driver::RotationDirection;
@@ -47,8 +47,7 @@ pub struct Movement {
 #[derive(Debug)]
 pub enum Action {
     MoveAll(Movement),
-    ReferenceAll,
-    ReferenceAxis(Axis),
+    ReferenceAxis(Axis, ReferenceRunOptParameters),
     ReferenceZHotend,
     HotendTarget(Option<u16>),
     BedTarget(Option<u16>),

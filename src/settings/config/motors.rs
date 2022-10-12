@@ -1,3 +1,4 @@
+use crate::comms::Axis;
 use nanotec_stepper_driver::{RotationDirection, StepMode};
 use num_traits::FromPrimitive;
 use serde::{
@@ -377,4 +378,14 @@ pub struct Motors {
     pub y: AxisMotor,
     pub z: AxisMotor,
     pub e: ExtruderMotor,
+}
+
+impl Motors {
+    pub fn axis(&self, axis: &Axis) -> &AxisMotor {
+        match axis {
+            Axis::X => &self.x,
+            Axis::Y => &self.y,
+            Axis::Z => &self.z,
+        }
+    }
 }

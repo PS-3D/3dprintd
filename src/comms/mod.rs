@@ -1,8 +1,16 @@
 use rocket::request::FromParam;
+use serde::Deserialize;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ReferenceRunOptParameters {
+    pub speed: Option<u32>,
+    pub accel_decel: Option<u32>,
+    pub jerk: Option<u32>,
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Axis {

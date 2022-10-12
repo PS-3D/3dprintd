@@ -3,7 +3,7 @@ use super::{
     error::GCodeError,
 };
 use crate::{
-    comms::{Axis, OnewayAtomicF64Read, OnewayAtomicF64Write},
+    comms::{Axis, OnewayAtomicF64Read, OnewayAtomicF64Write, ReferenceRunOptParameters},
     settings::Settings,
     util::{bail_own, ensure_own},
 };
@@ -81,20 +81,7 @@ fn mm_to_steps(mm: f64, translation: &f64, step_size: &StepMode) -> f64 {
     ((mm / translation) * (360.0 / 1.8) * (*step_size as u8) as f64).round()
 }
 
-// TODO state needs:
-// - feedrate
-// - current pos according to program
-// - actualy pos
-// - current program line probably
-// - settings for this run
-// - global settings
-// - actual current state (running, paused, stopped)
-//
-// that should probably also be shared - at least some of it, like current line -
-// with the api thread(s) so they can see the line we're in and show a percentage
-// ish for example
 // FIXME maybe change to fixed point?
-// FIXME zeropoint of z axis is at the low point, currently treated as if it were at high point
 #[derive(Debug)]
 pub struct Decoder {
     settings: Settings,
@@ -450,6 +437,7 @@ impl Decoder {
     // FIXME maybe we could home the z axis by setting the power down to where
     //       it wouldn't hurt the print head and then slowly move the bed
     //       into the printhead and then zeroeing?
+    // FIXME drive given axis to origin
     fn g28(&mut self, code: GCode) -> GCodeResult<VecDeque<Action>> {
         assert_code!(code, General, 28, 0);
         let mut x = false;
@@ -470,10 +458,16 @@ impl Decoder {
         let mut actions = VecDeque::with_capacity(2);
         // Can't use ReferenceAll because that would home Z axis as well.
         if x {
-            actions.push_back(Action::ReferenceAxis(Axis::X));
+            actions.push_back(Action::ReferenceAxis(
+                Axis::X,
+                ReferenceRunOptParameters::default(),
+            ));
         }
         if y {
-            actions.push_back(Action::ReferenceAxis(Axis::Y));
+            actions.push_back(Action::ReferenceAxis(
+                Axis::Y,
+                ReferenceRunOptParameters::default(),
+            ));
         }
         Ok(actions)
     }

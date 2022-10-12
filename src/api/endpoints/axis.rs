@@ -1,8 +1,8 @@
 use super::{json_ok_or, ApiPutSettingsResponse, JsonResult};
 use crate::{
-    api::values::Errors,
-    comms::Axis,
-    hw::{HwCtrl, PositionInfo},
+    api::values::{ApiError, Errors},
+    comms::{Axis, ReferenceRunOptParameters},
+    hw::{HwCtrl, PositionInfo, TryReferenceError},
     settings::Settings,
 };
 use rocket::{
@@ -197,23 +197,33 @@ pub enum ApiPostAxisReferenceResponse {
     InvalidInput(()),
     #[response(status = 409)]
     StateError(()),
+    #[response(status = 452)]
+    OutOfBounds(Json<ApiError>),
 }
 
-#[post("/axis/<xy>/reference")]
+#[post("/axis/<xy>/reference", data = "<params>")]
 pub fn post_axis_xy_reference(
     xy: ApiPostAxisXYReferenceAxis,
+    params: JsonResult<ReferenceRunOptParameters>,
     hw_ctrl: &State<HwCtrl>,
-) -> Result<status::Accepted<()>, status::Custom<()>> {
-    hw_ctrl
-        .try_reference_axis(xy.into())
-        .map(|_| status::Accepted(None))
-        .map_err(|_| status::Custom(Status { code: 409 }, ()))
+    errors: &State<Errors>,
+) -> ApiPostAxisReferenceResponse {
+    let params = json_ok_or!(params, ApiPostAxisReferenceResponse::InvalidInput(()));
+    match hw_ctrl.try_reference_axis(xy.into(), params) {
+        Ok(_) => ApiPostAxisReferenceResponse::Accepted(()),
+        Err(e) => match e {
+            TryReferenceError::StateError(_) => ApiPostAxisReferenceResponse::StateError(()),
+            oob_err => {
+                ApiPostAxisReferenceResponse::OutOfBounds(Json(errors.insert_get(oob_err.into())))
+            }
+        },
+    }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "direction", rename_all = "lowercase")]
 pub enum ApiPostAxisZReferenceDirection {
-    Endstop,
+    Endstop(ReferenceRunOptParameters),
     Hotend,
 }
 
@@ -221,14 +231,24 @@ pub enum ApiPostAxisZReferenceDirection {
 pub fn post_axis_z_reference(
     direction: JsonResult<ApiPostAxisZReferenceDirection>,
     hw_ctrl: &State<HwCtrl>,
+    errors: &State<Errors>,
 ) -> ApiPostAxisReferenceResponse {
     let direction = json_ok_or!(direction, ApiPostAxisReferenceResponse::InvalidInput(()));
-    let res = match direction {
-        ApiPostAxisZReferenceDirection::Endstop => hw_ctrl.try_reference_axis(Axis::Z),
-        ApiPostAxisZReferenceDirection::Hotend => hw_ctrl.try_reference_z_hotend(),
-    };
-    match res {
-        Ok(_) => ApiPostAxisReferenceResponse::Accepted(()),
-        Err(_) => ApiPostAxisReferenceResponse::StateError(()),
+    match direction {
+        ApiPostAxisZReferenceDirection::Endstop(params) => {
+            match hw_ctrl.try_reference_axis(Axis::Z, params) {
+                Ok(_) => ApiPostAxisReferenceResponse::Accepted(()),
+                Err(TryReferenceError::StateError(_)) => {
+                    ApiPostAxisReferenceResponse::StateError(())
+                }
+                Err(oob_err) => ApiPostAxisReferenceResponse::OutOfBounds(Json(
+                    errors.insert_get(oob_err.into()),
+                )),
+            }
+        }
+        ApiPostAxisZReferenceDirection::Hotend => match hw_ctrl.try_reference_z_hotend() {
+            Ok(_) => ApiPostAxisReferenceResponse::Accepted(()),
+            Err(_) => ApiPostAxisReferenceResponse::StateError(()),
+        },
     }
 }

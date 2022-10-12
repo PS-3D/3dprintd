@@ -5,7 +5,8 @@ use super::{
     state::{State, StateError, StateInfo},
 };
 use crate::{
-    comms::{Axis, ControlComms, OnewayAtomicF64Read},
+    comms::{Axis, ControlComms, OnewayAtomicF64Read, ReferenceRunOptParameters},
+    settings::Settings,
     util::ensure_own,
 };
 use anyhow::{ensure, Result};
@@ -14,6 +15,15 @@ use std::{
     path::PathBuf,
     sync::{Arc, RwLock},
 };
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum TryReferenceError {
+    #[error(transparent)]
+    StateError(#[from] StateError),
+    #[error("{} was out of bounds, was {}, must be <= {}", .0, .1, .2)]
+    OutOfBoundsError(&'static str, u32, u32),
+}
 
 pub struct PositionInfo {
     pub x: f64,
@@ -34,6 +44,7 @@ impl From<&OnewayPosRead> for PositionInfo {
 #[derive(Debug, Clone)]
 pub struct HwCtrl {
     state: Arc<RwLock<State>>,
+    settings: Settings,
     decoder_ctrl: DecoderCtrl,
     pi_ctrl: PiCtrl,
     executor_ctrl_send: Sender<ControlComms<ExecutorCtrl>>,
@@ -53,6 +64,7 @@ macro_rules! pos_info_axis {
 
 impl HwCtrl {
     pub(super) fn new(
+        settings: Settings,
         decoder_ctrl: DecoderCtrl,
         pi_ctrl: PiCtrl,
         executor_ctrl_send: Sender<ControlComms<ExecutorCtrl>>,
@@ -63,6 +75,7 @@ impl HwCtrl {
     ) -> Self {
         Self {
             state: Arc::new(RwLock::new(State::new())),
+            settings,
             decoder_ctrl,
             executor_ctrl_send,
             executor_manual_send,
@@ -92,11 +105,42 @@ impl HwCtrl {
         }
     }
 
-    pub fn try_reference_axis(&self, axis: Axis) -> Result<(), StateError> {
+    pub fn try_reference_axis(
+        &self,
+        axis: Axis,
+        parameters: ReferenceRunOptParameters,
+    ) -> Result<(), TryReferenceError> {
         let state = self.state.read().unwrap();
         ensure_own!(state.is_stopped(), StateError::NotStopped);
+        let cfg = self.settings.config().motors.axis(&axis);
+        if let Some(speed) = parameters.speed.as_ref() {
+            ensure_own!(
+                *speed <= cfg.speed_limit,
+                TryReferenceError::OutOfBoundsError("speed", *speed, cfg.speed_limit)
+            );
+        }
+        if let Some(accel_decel) = parameters.accel_decel.as_ref() {
+            ensure_own!(
+                *accel_decel <= cfg.accel_limit,
+                TryReferenceError::OutOfBoundsError("accel_decel", *accel_decel, cfg.accel_limit)
+            );
+            ensure_own!(
+                *accel_decel <= cfg.decel_limit,
+                TryReferenceError::OutOfBoundsError("accel_decel", *accel_decel, cfg.decel_limit)
+            );
+        }
+        if let Some(jerk) = parameters.jerk.as_ref() {
+            ensure_own!(
+                *jerk <= cfg.accel_jerk_limit,
+                TryReferenceError::OutOfBoundsError("accel_decel", *jerk, cfg.accel_jerk_limit)
+            );
+            ensure_own!(
+                *jerk <= cfg.decel_limit,
+                TryReferenceError::OutOfBoundsError("accel_decel", *jerk, cfg.decel_jerk_limit)
+            );
+        }
         self.executor_manual_send
-            .send(Action::ReferenceAxis(axis))
+            .send(Action::ReferenceAxis(axis, parameters))
             .unwrap();
         Ok(())
     }

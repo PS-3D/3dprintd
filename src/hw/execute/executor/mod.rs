@@ -73,11 +73,10 @@ impl Executor {
     pub fn exec(&mut self, action: Action) -> Result<()> {
         match action {
             Action::MoveAll(m) => self.motors.move_all(&m, self.settings.config()),
-            Action::ReferenceAll => self.motors.reference_all(&self.settings),
-            Action::ReferenceAxis(a) => match a {
-                Axis::X => self.motors.reference_x(&self.settings),
-                Axis::Y => self.motors.reference_y(&self.settings),
-                Axis::Z => self.motors.reference_z(&self.settings),
+            Action::ReferenceAxis(a, params) => match a {
+                Axis::X => self.motors.reference_x(&self.settings, params),
+                Axis::Y => self.motors.reference_y(&self.settings, params),
+                Axis::Z => self.motors.reference_z(&self.settings, params),
             },
             Action::ReferenceZHotend => self.exec_reference_z_hotend(),
             Action::HotendTarget(t) => self.exec_hotend_target(t),

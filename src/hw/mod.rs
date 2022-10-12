@@ -6,7 +6,7 @@ mod pi;
 mod state;
 
 pub use self::{
-    control::{HwCtrl, PositionInfo},
+    control::{HwCtrl, PositionInfo, TryReferenceError},
     decode::error::GCodeError,
     state::{StateError, StateInfo},
 };
@@ -37,8 +37,9 @@ pub fn start(
         estop_recv,
         error_send.clone(),
     )?;
-    let (decoder_handle, decoder_ctrl) = decode::start(settings, z_hotend_location.clone());
+    let (decoder_handle, decoder_ctrl) = decode::start(settings.clone(), z_hotend_location.clone());
     let hw_ctrl = HwCtrl::new(
+        settings,
         decoder_ctrl,
         pi_ctrl,
         executor_ctrl_send,

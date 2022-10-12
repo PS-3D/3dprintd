@@ -3,7 +3,7 @@ pub mod error;
 use self::error::{MotorError, MotorsError};
 use super::super::comms::{AxisMovement, ExtruderMovement, Movement};
 use crate::{
-    comms::{OnewayAtomicF64Read, OnewayAtomicF64Write},
+    comms::{OnewayAtomicF64Read, OnewayAtomicF64Write, ReferenceRunOptParameters},
     settings::{Config, Settings},
 };
 use anyhow::{ensure, Result};
@@ -33,13 +33,23 @@ pub struct Motors {
 
 macro_rules! make_reference_motor {
     ($name:ident, $axis:ident) => {
-        pub fn $name(&mut self, settings: &Settings) -> Result<()> {
+        pub fn $name(
+            &mut self,
+            settings: &Settings,
+            params: ReferenceRunOptParameters,
+        ) -> Result<()> {
             Motors::reference_motor(
                 &mut self.$axis.motor,
                 settings.config().motors.$axis.endstop_direction,
-                settings.motors().$axis().get_reference_speed(),
-                settings.motors().$axis().get_reference_accel_decel(),
-                settings.motors().$axis().get_reference_jerk(),
+                params
+                    .speed
+                    .unwrap_or(settings.motors().$axis().get_reference_speed()),
+                params
+                    .accel_decel
+                    .unwrap_or(settings.motors().$axis().get_reference_accel_decel()),
+                params
+                    .jerk
+                    .unwrap_or(settings.motors().$axis().get_reference_jerk()),
             )?;
             self.$axis.pos_mm.write(0.0);
             Ok(())
@@ -155,13 +165,6 @@ impl Motors {
     make_reference_motor!(reference_x, x);
     make_reference_motor!(reference_y, y);
     make_reference_motor!(reference_z, z);
-
-    pub fn reference_all(&mut self, settings: &Settings) -> Result<()> {
-        self.reference_x(settings)?;
-        self.reference_y(settings)?;
-        self.reference_z(settings)?;
-        Ok(())
-    }
 
     fn update_mm_xzy(&self, m: &Movement, config: &Config) {
         macro_rules! update_axis {
