@@ -107,7 +107,7 @@ impl PiCtrl {
 
     pub fn try_set_hotend_target(&self, target: Option<u16>) -> Result<(), PiCtrlError> {
         if let Some(temp) = target.as_ref() {
-            let cfg = self.settings.config().hotend;
+            let cfg = &self.settings.config().hotend;
             ensure_own!(
                 cfg.lower_limit <= *temp && *temp <= cfg.upper_limit,
                 PiCtrlError::TargetOutOfBounds(*temp, cfg.lower_limit, cfg.upper_limit)
@@ -121,7 +121,7 @@ impl PiCtrl {
 
     fn ensure_bed_target_in_range(&self, target: &Option<u16>) -> Result<(), PiCtrlError> {
         if let Some(temp) = target.as_ref() {
-            let cfg = self.settings.config().bed;
+            let cfg = &self.settings.config().bed;
             ensure_own!(
                 cfg.lower_limit <= *temp && *temp <= cfg.upper_limit,
                 PiCtrlError::TargetOutOfBounds(*temp, cfg.lower_limit, cfg.upper_limit)
