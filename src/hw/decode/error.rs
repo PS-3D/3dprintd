@@ -1,4 +1,4 @@
-use super::super::{comms::GCode, state::StateError};
+use super::{super::state::StateError, GCode};
 use gcode::Word;
 use std::io::Error as IoError;
 use thiserror::Error;

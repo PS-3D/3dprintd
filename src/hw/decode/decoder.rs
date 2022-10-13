@@ -1,6 +1,7 @@
 use super::{
-    super::comms::{Action, AxisMovement, ExtruderMovement, GCode, Movement},
+    super::comms::{Action, AxisMovement, ExtruderMovement, Movement},
     error::GCodeError,
+    parser::GCode,
 };
 use crate::{
     comms::{Axis, OnewayAtomicF64Read, OnewayAtomicF64Write, ReferenceRunOptParameters},
@@ -637,6 +638,8 @@ impl Decoder {
     ///
     /// `code` must contain a supported G-, M- or TCode, otherwise an Error will
     /// be thrown.
+    // FIXME make GCodeResult<VecDeque<(Action, GCode)>> and then just return
+    // an empty queue on what would otherwise have been None
     pub fn decode(&mut self, code: GCode) -> GCodeResult<Option<VecDeque<(Action, GCode)>>> {
         trace!(
             target: target::INTERNAL,

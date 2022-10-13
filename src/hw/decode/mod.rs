@@ -1,17 +1,24 @@
+mod control;
 mod decoder;
 pub mod error;
+mod parser;
 
-use self::decoder::Decoder as InnerDecoder;
+pub use self::{
+    control::DecoderCtrl,
+    parser::{GCode, GCodeSpan, ParserError, ParsingError},
+};
+use self::{decoder::Decoder as InnerDecoder, parser::Parser};
 use super::{
-    comms::{Action, DecoderComms, ExecutorGCodeComms, GCode},
-    state::StateError,
+    comms::{Action, ExecutorGCodeComms},
+    GCodeError,
 };
 use crate::{
     comms::{ControlComms, OnewayAtomicF64Read},
     log::target,
     settings::Settings,
+    util::send_err,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use crossbeam::{
     channel::{self, Receiver, Sender},
     select,
@@ -19,22 +26,25 @@ use crossbeam::{
 use std::{
     collections::VecDeque,
     fs::File,
-    io::Read,
     path::PathBuf,
-    sync::{Arc, RwLock},
     thread::{self, JoinHandle},
 };
-use tracing::debug;
+use thiserror::Error;
+use tracing::{debug, error};
 
-// FIXME make buffer only parts of the gcode from the file so we don't need
-// to store all of it in memory and can print arbitrarily large files
+enum DecoderComms {
+    Start(Sender<ExecutorGCodeComms>, File, PathBuf),
+    Stop,
+    Pause,
+    Play,
+}
+
+const BUFSIZE: usize = 512;
+
 #[derive(Debug)]
 struct DecoderStateData {
-    // FIXME move this buffer out of state and directly into the decode thread
-    // this is only really possible if we incrementally parse the gcode file
-    // we can then store the location in the file here
+    pub parser: Parser<File>,
     pub buf: VecDeque<(Action, GCode)>,
-    pub path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -58,13 +68,16 @@ impl DecoderState {
         }
     }
 
-    pub fn print(&mut self, actions: VecDeque<(Action, GCode)>, path: PathBuf) {
+    pub fn start(&mut self, parser: Parser<File>) {
         match self.state {
             InnerDecoderState::Printing => panic!("can't print, already printing"),
             InnerDecoderState::Paused => panic!("can't print, is paused"),
             InnerDecoderState::Stopped => {
                 self.state = InnerDecoderState::Printing;
-                self.data = Some(DecoderStateData { buf: actions, path })
+                self.data = Some(DecoderStateData {
+                    parser,
+                    buf: VecDeque::new(),
+                })
             }
         }
     }
@@ -99,106 +112,78 @@ impl DecoderState {
     }
 }
 
-// should only be locked in this order:
-// 1. state
-// 2. decoder
-//
-// if decoder is locked for writing, state must be locked for writing as well
-#[derive(Debug, Clone)]
-pub struct DecoderCtrl {
-    state: Arc<RwLock<DecoderState>>,
-    decoder: Arc<RwLock<InnerDecoder>>,
-    decoder_send: Sender<ControlComms<DecoderComms>>,
+#[derive(Debug, Error)]
+pub enum DecoderError {
+    #[error("Error while parsing: {}", .0)]
+    ParserError(#[from] ParserError),
+    #[error("Error while decoding: {}", .0)]
+    GCodeError(#[from] GCodeError),
 }
 
-impl DecoderCtrl {
-    fn send_decoder_state_change(&self, msg: DecoderComms) {
-        self.decoder_send.send(ControlComms::Msg(msg)).unwrap();
+struct Decoder {
+    state: DecoderState,
+    decoder: InnerDecoder,
+}
+
+impl Decoder {
+    pub fn new(settings: Settings, z_hotend_location: OnewayAtomicF64Read) -> Self {
+        Self {
+            state: DecoderState::new(),
+            decoder: InnerDecoder::new(settings, z_hotend_location),
+        }
     }
 
-    pub fn print(
-        &self,
-        path: PathBuf,
-        executor_gcode_send: Sender<ExecutorGCodeComms>,
-    ) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        let mut file = File::open(&path).context("Failed to open gcode file")?;
-        let mut s = String::new();
-        file.read_to_string(&mut s)?;
-        // FIXME treat parsing errors
-        let iter = gcode::parse(s.as_str());
-        let mut actions = VecDeque::with_capacity(iter.size_hint().0);
-        let mut decoder = self.decoder.write().unwrap();
-        for code in iter {
-            if let Some(dq) = decoder.decode(GCode::new(code, 0, path.clone()))? {
-                actions.extend(dq);
+    fn check_buffer(&mut self) -> Result<(), DecoderError> {
+        let state_data = self.state.data_mut().unwrap();
+        if state_data.buf.is_empty() {
+            // TODO opitmise
+            for codes in state_data.parser.try_n(BUFSIZE).into_iter() {
+                for code in codes.into_iter() {
+                    if let Some(actions) = self.decoder.decode(code)? {
+                        state_data.buf.extend(actions);
+                    }
+                }
             }
         }
-        state.print(actions, path);
-        self.send_decoder_state_change(DecoderComms::Started(executor_gcode_send));
         Ok(())
     }
 
-    pub fn stop(&self) {
-        let mut state = self.state.write().unwrap();
-        let mut decoder = self.decoder.write().unwrap();
-        state.stop();
-        decoder.reset();
-        self.send_decoder_state_change(DecoderComms::Stopped);
+    /// Tries to get the next (Action, GCode) tuple and if necessary reads it from
+    /// the file/stream and decodes it
+    ///
+    /// # Panics
+    /// if the state isn't printing
+    pub fn next(&mut self) -> Option<Result<(Action, GCode), DecoderError>> {
+        if let Err(e) = self.check_buffer() {
+            return Some(Err(e));
+        }
+        let state_data = self.state.data_mut().unwrap();
+        state_data.buf.pop_front().map(|a| Ok(a))
     }
 
-    pub fn play(&self) {
-        self.state.write().unwrap().play();
-        self.send_decoder_state_change(DecoderComms::Played);
+    pub fn start(&mut self, file: File, path: PathBuf) {
+        self.state.start(Parser::new(file, path))
     }
 
-    pub fn pause(&self) {
-        self.state.write().unwrap().pause();
-        self.send_decoder_state_change(DecoderComms::Paused);
+    pub fn stop(&mut self) {
+        self.state.stop();
+        self.decoder.reset()
     }
 
-    pub fn exit(&self) {
-        self.decoder_send.send(ControlComms::Exit).unwrap();
+    pub fn play(&mut self) {
+        self.state.play()
+    }
+
+    pub fn pause(&mut self) {
+        self.state.pause()
     }
 }
 
-struct DecoderThread {
-    state: Arc<RwLock<DecoderState>>,
-    decoder: Arc<RwLock<InnerDecoder>>,
-}
-
-impl DecoderThread {
-    fn new(settings: Settings, z_hotend_location: OnewayAtomicF64Read) -> Self {
-        Self {
-            state: Arc::new(RwLock::new(DecoderState::new())),
-            decoder: Arc::new(RwLock::new(InnerDecoder::new(settings, z_hotend_location))),
-        }
-    }
-
-    fn get_ctrl(&self, decoder_send: Sender<ControlComms<DecoderComms>>) -> DecoderCtrl {
-        DecoderCtrl {
-            state: Arc::clone(&self.state),
-            decoder: Arc::clone(&self.decoder),
-            decoder_send,
-        }
-    }
-
-    fn try_get_next(&self) -> Result<Option<(Action, GCode)>, StateError> {
-        let mut state = self.state.write().unwrap();
-        let state_data = state.data_mut().ok_or(StateError::NotPrinting)?;
-        let next = state_data
-            .buf
-            .pop_front()
-            .map(|(action, code)| (action, code));
-        // if there is nothing left in the buffer, we need to stop
-        if next.is_none() {
-            state.stop();
-        }
-        Ok(next)
-    }
-}
-
-fn decoder_loop(decoder: DecoderThread, decoder_recv: Receiver<ControlComms<DecoderComms>>) {
+fn decoder_loop(
+    mut decoder: Decoder,
+    decoder_recv: Receiver<ControlComms<DecoderComms>>,
+    error_send: Sender<ControlComms<Error>>,
+) {
     // we need this buf so that we always have something to send
     // if the status changes but we weren't notified of it yet and need to
     // send a message to the executor.
@@ -213,10 +198,12 @@ fn decoder_loop(decoder: DecoderThread, decoder_recv: Receiver<ControlComms<Deco
         ($msg:expr) => {{
             match $msg {
                 ControlComms::Msg(m) => match m {
-                    DecoderComms::Started(executor_gcode_send) => {
-                        executor_gcode_send_opt = Some(executor_gcode_send)
+                    DecoderComms::Start(executor_gcode_send, file, path) => {
+                        decoder.start(file, path);
+                        executor_gcode_send_opt = Some(executor_gcode_send);
                     }
-                    DecoderComms::Stopped => {
+                    DecoderComms::Stop => {
+                        decoder.stop();
                         executor_gcode_send_opt = None;
                         buf = None;
                     }
@@ -233,13 +220,22 @@ fn decoder_loop(decoder: DecoderThread, decoder_recv: Receiver<ControlComms<Deco
     loop {
         if let Some(executor_gcode_send) = executor_gcode_send_opt.as_ref() {
             if buf.is_none() {
-                buf = decoder.try_get_next().ok().flatten();
+                match decoder.next() {
+                    Some(Ok(a)) => buf = Some(a),
+                    // FIXME stop on error and change HwCtrl state
+                    Some(Err(e)) => {
+                        error!(target: target::PUBLIC, "{}", e);
+                        error_send.send(ControlComms::Msg(e.into())).unwrap()
+                    }
+                    _ => (),
+                }
                 // if buf is still None, that's the end of the gcode
                 if buf.is_none() {
                     // send an Exit message in the gcode channel, signalling the end
                     // of the gcode
                     // ignore possibly disconnected receiver since that would mean
                     // the exec thread got stopped but we will do that anyways
+                    // FIXME change HwCtrl state when gcode is done
                     let _ = executor_gcode_send.send(ControlComms::Exit);
                     executor_gcode_send_opt = None;
                     // we don't need to try the rest of the loop, buf is none anyways
@@ -271,13 +267,14 @@ fn decoder_loop(decoder: DecoderThread, decoder_recv: Receiver<ControlComms<Deco
 pub fn start(
     settings: Settings,
     z_hotend_location: OnewayAtomicF64Read,
+    error_send: Sender<ControlComms<Error>>,
 ) -> Result<(JoinHandle<()>, DecoderCtrl)> {
     let (decoder_send, decoder_recv) = channel::unbounded();
-    let decoder_thread = DecoderThread::new(settings, z_hotend_location);
-    let decoder_ctrl = decoder_thread.get_ctrl(decoder_send);
+    let decoder_thread = Decoder::new(settings, z_hotend_location);
+    let decoder_ctrl = DecoderCtrl::new(decoder_send);
     let handle = thread::Builder::new()
         .name(String::from("decoder"))
-        .spawn(move || decoder_loop(decoder_thread, decoder_recv))
+        .spawn(move || decoder_loop(decoder_thread, decoder_recv, error_send))
         .context("Creating the decoder thread failed")?;
     Ok((handle, decoder_ctrl))
 }

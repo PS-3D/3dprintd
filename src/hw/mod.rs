@@ -38,7 +38,7 @@ pub fn start(
         error_send.clone(),
     )?;
     let (decoder_handle, decoder_ctrl) =
-        decode::start(settings.clone(), z_hotend_location.clone())?;
+        decode::start(settings.clone(), z_hotend_location.clone(), error_send)?;
     let hw_ctrl = HwCtrl::new(
         settings,
         decoder_ctrl,
