@@ -9,6 +9,7 @@ use super::{
 use crate::{
     comms::{ControlComms, OnewayAtomicF64Read},
     hw::comms::OnewayPosRead,
+    log::target,
     settings::Settings,
     util::send_err,
 };
@@ -21,6 +22,7 @@ use std::{
     sync::atomic::Ordering,
     thread::{self, JoinHandle},
 };
+use tracing::{debug, info};
 
 fn executor_loop(
     mut exec: Executor,
@@ -34,10 +36,25 @@ fn executor_loop(
         ($msg:expr) => {{
             match $msg {
                 ControlComms::Msg(c) => match c {
-                    ExecutorCtrl::GCode(gcode_recv, line) => gcode = Some((gcode_recv, line)),
-                    ExecutorCtrl::Manual => gcode = None,
+                    ExecutorCtrl::GCode(gcode_recv, line) => {
+                        debug!(
+                            target: target::INTERNAL,
+                            "executor thread switching to gcode"
+                        );
+                        gcode = Some((gcode_recv, line))
+                    }
+                    ExecutorCtrl::Manual => {
+                        debug!(
+                            target: target::INTERNAL,
+                            "executor thread switching to manual"
+                        );
+                        gcode = None
+                    }
                 },
-                ControlComms::Exit => break,
+                ControlComms::Exit => {
+                    debug!(target: target::INTERNAL, "received exit, exiting...");
+                    break;
+                }
             };
         }};
     }
@@ -66,10 +83,10 @@ fn executor_loop(
                     // because we might get the message before we executed
                     // all messages from the gcode buffer
                     match msg.unwrap() {
-                        ControlComms::Msg((action, span)) => {
+                        ControlComms::Msg((action, code)) => {
                             // FIXME maybe use Ordering::Relaxed since it doesn't really matter?
-                            line.store(span.inner.line, Ordering::Release);
-                            // TODO attach span info to error
+                            line.store(code.span().line(), Ordering::Release);
+                            debug!(target: target::PUBLIC, "Executing {}", code);
                             send_err!(exec.exec(action), error_send)
                         },
                         ControlComms::Exit => gcode = None,
@@ -121,9 +138,15 @@ pub fn start(
                                 // if there's an IO error writing, it's probably a good plan to
                                 // panic
                                 ControlComms::Msg(m) => match m {
-                                    EStopComms::EStop => estop.estop(2000).unwrap(),
+                                    EStopComms::EStop => {
+                                        info!(target: target::PUBLIC, "executing estop");
+                                        estop.estop(2000).unwrap()
+                                    }
                                 },
-                                ControlComms::Exit => break,
+                                ControlComms::Exit => {
+                                    debug!(target: target::INTERNAL, "received exit, exiting...");
+                                    break;
+                                }
                             }
                         }
                     })

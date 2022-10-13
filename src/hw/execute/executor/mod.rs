@@ -2,10 +2,12 @@ use super::{super::comms::Action, motors::Motors};
 use crate::{
     comms::{Axis, OnewayAtomicF64Read, OnewayAtomicF64Write},
     hw::pi::PiCtrl,
+    log::target,
     settings::Settings,
 };
 use anyhow::Result;
 use std::{thread, time::Duration};
+use tracing::debug;
 
 pub struct Executor {
     settings: Settings,
@@ -71,6 +73,7 @@ impl Executor {
     }
 
     pub fn exec(&mut self, action: Action) -> Result<()> {
+        debug!(target: target::INTERNAL, "Executing {:?}", action);
         match action {
             Action::MoveAll(m) => self.motors.move_all(&m, self.settings.config()),
             Action::ReferenceAxis(a, params) => match a {

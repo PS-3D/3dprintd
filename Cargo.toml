@@ -44,3 +44,4 @@ nanotec-stepper-driver = { git = "https://github.com/PS-3D/nanotec-stepper-drive
 num-traits = "0.2.15"
 thiserror = "1.0.37"
 indexmap = "1.9.1"
+atty = "0.2.14"

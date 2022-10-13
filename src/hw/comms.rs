@@ -1,6 +1,6 @@
 use crate::comms::{Axis, ControlComms, OnewayAtomicF64Read, ReferenceRunOptParameters};
 use crossbeam::channel::{Receiver, Sender};
-use gcode::Span as InnerSpan;
+use gcode::{GCode as InnerGCode, Mnemonic, Word};
 use nanotec_stepper_driver::RotationDirection;
 use std::{
     fmt::{self, Display},
@@ -57,19 +57,75 @@ pub enum Action {
     Wait(Duration),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GCodeSpan {
-    pub path: PathBuf,
-    pub inner: InnerSpan,
+    line: usize,
+    origin: PathBuf,
 }
 
-impl Display for GCodeSpan {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} , line {}", self.path.display(), self.inner.line + 1)
+impl GCodeSpan {
+    pub fn line(&self) -> usize {
+        self.line
+    }
+
+    pub fn path(&self) -> &PathBuf {
+        &self.origin
     }
 }
 
-pub type ExecutorGCodeComms = ControlComms<(Action, GCodeSpan)>;
+#[derive(Debug, Clone)]
+pub struct GCode {
+    code: InnerGCode,
+    line_offset: usize,
+    origin: PathBuf,
+}
+
+impl Display for GCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} from {}:{}",
+            self.code,
+            self.origin.display(),
+            self.code.span().line + self.line_offset + 1
+        )
+    }
+}
+
+impl GCode {
+    pub fn new(code: InnerGCode, line_offset: usize, origin: PathBuf) -> Self {
+        Self {
+            code,
+            line_offset,
+            origin,
+        }
+    }
+
+    pub fn mnemonic(&self) -> Mnemonic {
+        self.code.mnemonic()
+    }
+
+    pub fn major_number(&self) -> u32 {
+        self.code.major_number()
+    }
+
+    pub fn minor_number(&self) -> u32 {
+        self.code.minor_number()
+    }
+
+    pub fn arguments(&self) -> &[Word] {
+        self.code.arguments()
+    }
+
+    pub fn span(&self) -> GCodeSpan {
+        GCodeSpan {
+            line: self.code.span().line + self.line_offset + 1,
+            origin: self.origin.clone(),
+        }
+    }
+}
+
+pub type ExecutorGCodeComms = ControlComms<(Action, GCode)>;
 
 pub enum ExecutorCtrl {
     GCode(Receiver<ExecutorGCodeComms>, Arc<AtomicUsize>),

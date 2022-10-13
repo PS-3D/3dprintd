@@ -7,10 +7,12 @@ mod log;
 mod settings;
 mod util;
 
-use crate::comms::ControlComms;
+use crate::{comms::ControlComms, log::target};
 use anyhow::Result;
 use crossbeam::channel;
 use tracing::debug;
+#[cfg(any(feature = "dev_no_pi", feature = "dev_no_motors"))]
+use tracing::warn;
 
 pub const APP_NAME: &'static str = env!("CARGO_BIN_NAME");
 
@@ -47,9 +49,19 @@ pub const APP_NAME: &'static str = env!("CARGO_BIN_NAME");
 fn main() -> Result<()> {
     let args = args::args();
     let config = config::config(&args)?;
-    log::setup(config.general.log_level);
-    debug!("Args are: {:?}", args);
-    debug!("Config is: {:?}", config);
+    log::setup(config.log.level);
+    #[cfg(feature = "dev_no_pi")]
+    warn!(
+        target: target::INTERNAL,
+        "Feature dev_no_pi is enabled, binary is not fully functional"
+    );
+    #[cfg(feature = "dev_no_motors")]
+    warn!(
+        target: target::INTERNAL,
+        "Feature dev_no_motors is enabled, binary is not fully functional"
+    );
+    debug!(target: target::INTERNAL, "Args are: {:?}", args);
+    debug!(target: target::INTERNAL, "Config is: {:?}", config);
     let settings = settings::settings(config)?;
     let (error_send, error_recv) = channel::unbounded();
     let (error_handle, errors) = api::values::start(error_recv)?;

@@ -20,6 +20,23 @@ use tracing::Level;
 
 //
 
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct General {
+    // FIXME force to be absolute
+    pub settings_path: PathBuf,
+}
+
+impl Default for General {
+    fn default() -> Self {
+        Self {
+            settings_path: PathBuf::from(format!("/var/lib/{}/settings.json", APP_NAME)),
+        }
+    }
+}
+
+//
+
 struct LogLevelVisitor();
 
 impl<'de> Visitor<'de> for LogLevelVisitor {
@@ -56,19 +73,14 @@ where
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
-pub struct General {
-    // FIXME force to be absolute
-    pub settings_path: PathBuf,
+pub struct Log {
     #[serde(deserialize_with = "deserialize_log_level")]
-    pub log_level: Level,
+    pub level: Level,
 }
 
-impl Default for General {
+impl Default for Log {
     fn default() -> Self {
-        Self {
-            settings_path: PathBuf::from(format!("/var/lib/{}/settings.json", APP_NAME)),
-            log_level: Level::WARN,
-        }
+        Self { level: Level::WARN }
     }
 }
 
@@ -156,6 +168,8 @@ pub struct Bed {
 pub struct Config {
     #[serde(default)]
     pub general: General,
+    #[serde(default)]
+    pub log: Log,
     #[serde(default)]
     pub api: Api,
     pub motors: Motors,

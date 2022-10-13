@@ -43,18 +43,18 @@ pub struct Args {
 impl Provider for Args {
     fn metadata(&self) -> Metadata {
         Metadata::named("program argument(s)").interpolater(|_, path| match path {
+            ["log", "level"] => String::from("-l/--log-level"),
             ["api", "port"] => String::from("-p/--port"),
             ["api", "address"] => String::from("-a/--address"),
-            ["general", "log_level"] => String::from("-l/--log-level"),
             _ => unreachable!(),
         })
     }
 
     fn data(&self) -> Result<Map<Profile, Dict>, figment::Error> {
-        let mut general = Map::new();
+        let mut log = Map::new();
         if let Some(l) = &self.log_level {
-            general.insert(
-                String::from("log_level"),
+            log.insert(
+                String::from("level"),
                 Value::from(format!("{}", l).to_ascii_lowercase()),
             );
         }
@@ -70,7 +70,7 @@ impl Provider for Args {
             api.insert(String::from("address"), Value::from(format!("{}", a)));
         }
         let mut vals = Map::new();
-        vals.insert(String::from("general"), Value::from(general));
+        vals.insert(String::from("log"), Value::from(log));
         vals.insert(String::from("api"), Value::from(api));
         let mut map = Map::new();
         map.insert(Profile::Global, vals);

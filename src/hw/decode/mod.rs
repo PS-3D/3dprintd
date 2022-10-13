@@ -3,11 +3,12 @@ pub mod error;
 
 use self::decoder::Decoder as InnerDecoder;
 use super::{
-    comms::{Action, DecoderComms, ExecutorGCodeComms, GCodeSpan},
+    comms::{Action, DecoderComms, ExecutorGCodeComms, GCode},
     state::StateError,
 };
 use crate::{
     comms::{ControlComms, OnewayAtomicF64Read},
+    log::target,
     settings::Settings,
 };
 use anyhow::{Context, Result};
@@ -15,7 +16,6 @@ use crossbeam::{
     channel::{self, Receiver, Sender},
     select,
 };
-use gcode::Span;
 use std::{
     collections::VecDeque,
     fs::File,
@@ -24,6 +24,7 @@ use std::{
     sync::{Arc, RwLock},
     thread::{self, JoinHandle},
 };
+use tracing::debug;
 
 // FIXME make buffer only parts of the gcode from the file so we don't need
 // to store all of it in memory and can print arbitrarily large files
@@ -32,7 +33,7 @@ struct DecoderStateData {
     // FIXME move this buffer out of state and directly into the decode thread
     // this is only really possible if we incrementally parse the gcode file
     // we can then store the location in the file here
-    pub buf: VecDeque<(Action, Span)>,
+    pub buf: VecDeque<(Action, GCode)>,
     pub path: PathBuf,
 }
 
@@ -57,7 +58,7 @@ impl DecoderState {
         }
     }
 
-    pub fn print(&mut self, actions: VecDeque<(Action, Span)>, path: PathBuf) {
+    pub fn print(&mut self, actions: VecDeque<(Action, GCode)>, path: PathBuf) {
         match self.state {
             InnerDecoderState::Printing => panic!("can't print, already printing"),
             InnerDecoderState::Paused => panic!("can't print, is paused"),
@@ -129,7 +130,7 @@ impl DecoderCtrl {
         let mut actions = VecDeque::with_capacity(iter.size_hint().0);
         let mut decoder = self.decoder.write().unwrap();
         for code in iter {
-            if let Some(dq) = decoder.decode(code)? {
+            if let Some(dq) = decoder.decode(GCode::new(code, 0, path.clone()))? {
                 actions.extend(dq);
             }
         }
@@ -182,18 +183,13 @@ impl DecoderThread {
         }
     }
 
-    fn try_get_next(&self) -> Result<Option<(Action, GCodeSpan)>, StateError> {
+    fn try_get_next(&self) -> Result<Option<(Action, GCode)>, StateError> {
         let mut state = self.state.write().unwrap();
         let state_data = state.data_mut().ok_or(StateError::NotPrinting)?;
-        let next = state_data.buf.pop_front().map(|(action, span)| {
-            (
-                action,
-                GCodeSpan {
-                    path: state_data.path.clone(),
-                    inner: span,
-                },
-            )
-        });
+        let next = state_data
+            .buf
+            .pop_front()
+            .map(|(action, code)| (action, code));
         // if there is nothing left in the buffer, we need to stop
         if next.is_none() {
             state.stop();
@@ -227,7 +223,10 @@ fn decoder_loop(decoder: DecoderThread, decoder_recv: Receiver<ControlComms<Deco
                     // if we played or paused, we don't really need to do anything
                     _ => continue,
                 },
-                ControlComms::Exit => break,
+                ControlComms::Exit => {
+                    debug!(target: target::INTERNAL, "received exit, exiting...");
+                    break;
+                }
             }
         }};
     }

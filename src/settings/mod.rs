@@ -1,5 +1,8 @@
-use crate::config::{self, Config};
-use anyhow::{Context, Error, Result};
+use crate::{
+    config::{self, Config},
+    log::target,
+};
+use anyhow::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::{
@@ -7,7 +10,7 @@ use std::{
     io::{self, Read, Write},
     sync::{Arc, RwLock},
 };
-use tracing::warn;
+use tracing::{error, warn};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -139,10 +142,13 @@ impl Settings {
             Ok(f) => Some(f),
             Err(e) => {
                 if e.kind() == io::ErrorKind::NotFound {
+                    warn!(target: target::PUBLIC, "Settings file not found");
                     None
                 } else {
-                    // TODO check if it might work better with tracing/log
-                    return Err(Error::from(e)).context("Failed to open settings-file");
+                    let msg = "Failed to open settings-file";
+                    error!(target: target::PUBLIC, "{}: {}", msg, e);
+                    let e = Error::from(e).context(msg);
+                    return Err(e);
                 }
             }
         };
@@ -158,11 +164,14 @@ impl Settings {
                 if !contents.trim().is_empty() {
                     serde_json::from_str(&contents)?
                 } else {
-                    warn!("settings-file is empty");
+                    warn!(target: target::PUBLIC, "Settings-file is empty");
                     Default::default()
                 }
             } else {
-                warn!("there was no settings-file found at the given location");
+                warn!(
+                    target: target::PUBLIC,
+                    "There was no settings-file found at the given location"
+                );
                 // if file didn't exist, use default vaules
                 Default::default()
             }
@@ -175,7 +184,12 @@ impl Settings {
 
     pub fn save(&self) -> Result<()> {
         let mut file = File::create(&self.config.general.settings_path)
-            .context("Failed to open settings-file for writing")?;
+            // FIXME https://github.com/rust-lang/rust/issues/91345
+            .map_err(|e| {
+                let msg = "Failed to open settings-file for writing";
+                error!(target: target::PUBLIC, "{}: {}", msg, e);
+                Error::from(e).context(msg)
+            })?;
         serde_json::to_writer(&file, self.settings.as_ref())?;
         file.flush().map_err(|e| e.into())
     }

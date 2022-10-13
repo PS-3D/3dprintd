@@ -5,6 +5,7 @@ pub use self::error::{ExitError, PiCtrlError, WaitTempError};
 use self::pi::RevPi;
 use crate::{
     comms::ControlComms,
+    log::target,
     settings::Settings,
     util::{ensure_own, send_err},
 };
@@ -20,9 +21,11 @@ use std::{
     thread::{self, JoinHandle},
     time::Duration,
 };
+use tracing::debug;
 
 type WaitTempComms = Result<(), WaitTempError>;
 
+#[derive(Debug)]
 enum InnerPiComms {
     SetHotendTarget(Option<u16>),
     SetBedTarget(Option<u16>),
@@ -294,20 +297,24 @@ fn pi_loop(
         match pi_recv.try_recv() {
             Ok(msg) => {
                 match msg {
-                    ControlComms::Msg(msg) => match msg {
-                        InnerPiComms::SetHotendTarget(target) => data.set_hotend_target(target),
-                        InnerPiComms::SetBedTarget(target) => data.set_bed_target(target),
-                        InnerPiComms::WaitHotendTarget(notify_send) => {
-                            data.add_hotend_waiting(notify_send)
+                    ControlComms::Msg(msg) => {
+                        debug!(target: target::INTERNAL, "received {:?}, executing...", msg);
+                        match msg {
+                            InnerPiComms::SetHotendTarget(target) => data.set_hotend_target(target),
+                            InnerPiComms::SetBedTarget(target) => data.set_bed_target(target),
+                            InnerPiComms::WaitHotendTarget(notify_send) => {
+                                data.add_hotend_waiting(notify_send)
+                            }
+                            InnerPiComms::WaitBedTarget(notify_send) => {
+                                data.add_bed_waiting(notify_send)
+                            }
+                            InnerPiComms::WaitMinBedTemp(min_temp, notify_send) => {
+                                data.add_bed_min_waiting(min_temp, notify_send)
+                            }
                         }
-                        InnerPiComms::WaitBedTarget(notify_send) => {
-                            data.add_bed_waiting(notify_send)
-                        }
-                        InnerPiComms::WaitMinBedTemp(min_temp, notify_send) => {
-                            data.add_bed_min_waiting(min_temp, notify_send)
-                        }
-                    },
+                    }
                     ControlComms::Exit => {
+                        debug!(target: target::INTERNAL, "received exit, exiting...");
                         send_err!(data.exit(), error_send);
                         break;
                     }

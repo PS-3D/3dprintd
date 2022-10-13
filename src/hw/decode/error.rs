@@ -1,5 +1,5 @@
-use super::super::state::StateError;
-use gcode::{GCode, Word};
+use super::super::{comms::GCode, state::StateError};
+use gcode::Word;
 use std::io::Error as IoError;
 use thiserror::Error;
 
