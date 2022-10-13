@@ -1,14 +1,16 @@
 mod api;
+mod args;
 mod comms;
+mod config;
 mod hw;
+mod log;
 mod settings;
 mod util;
 
 use crate::comms::ControlComms;
 use anyhow::Result;
 use crossbeam::channel;
-use tracing::Level;
-use tracing_subscriber;
+use tracing::debug;
 
 pub const APP_NAME: &'static str = env!("CARGO_BIN_NAME");
 
@@ -43,11 +45,12 @@ pub const APP_NAME: &'static str = env!("CARGO_BIN_NAME");
 // the decode thread should be more than fast enough to keep up, the main concern
 // with splitting is responsetime.
 fn main() -> Result<()> {
-    // TODO swap out for something better
-    tracing_subscriber::fmt::fmt()
-        .with_max_level(Level::DEBUG)
-        .init();
-    let settings = settings::settings()?;
+    let args = args::args();
+    let config = config::config(&args)?;
+    log::setup(config.general.log_level);
+    debug!("Args are: {:?}", args);
+    debug!("Config is: {:?}", config);
+    let settings = settings::settings(config)?;
     let (error_send, error_recv) = channel::unbounded();
     let (error_handle, errors) = api::values::start(error_recv)?;
     let (pi_handle, executor_handle, estop_handle, decoder_handle, hw_ctrl) =
@@ -64,3 +67,4 @@ fn main() -> Result<()> {
 }
 
 // TODO change settings depending on release or debug build, i.e. maybe stop on ctrlc
+// TODO consolidate errors

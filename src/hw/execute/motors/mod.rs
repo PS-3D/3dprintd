@@ -4,7 +4,8 @@ use self::error::{MotorError, MotorsError};
 use super::super::comms::{AxisMovement, ExtruderMovement, Movement};
 use crate::{
     comms::{OnewayAtomicF64Read, OnewayAtomicF64Write, ReferenceRunOptParameters},
-    settings::{Config, Settings},
+    config::Config,
+    settings::Settings,
 };
 use anyhow::{ensure, Context, Result};
 #[cfg(not(feature = "dev_no_motors"))]

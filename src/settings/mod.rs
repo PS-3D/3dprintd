@@ -1,6 +1,4 @@
-mod config;
-
-pub use self::config::Config;
+use crate::config::{self, Config};
 use anyhow::{Context, Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -42,6 +40,7 @@ macro_rules! get_motor_setting {
     }};
 }
 
+// FIXME check limits
 macro_rules! set_motor_setting {
     ($self:ident, $setting:ident, $value:expr) => {{
         ($self.fm)(&mut $self.settings.write().unwrap().motors).$setting = Some($value)
@@ -193,7 +192,6 @@ impl Settings {
     }
 }
 
-pub fn settings() -> Result<Settings> {
-    let cfg = config::config()?;
-    Ok(Settings::new(cfg)?)
+pub fn settings(config: Config) -> Result<Settings> {
+    Settings::new(config)
 }

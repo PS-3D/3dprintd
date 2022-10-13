@@ -1,36 +1,73 @@
-mod args;
 mod motors;
 
-use crate::APP_NAME;
+use crate::{args::Args, APP_NAME};
 use anyhow::Result;
-use args::Args;
-use clap::Parser;
 use figment::{
     providers::{Format, Toml},
     Figment,
 };
 pub use motors::{AxisMotor, ExtruderMotor, Motors};
 use rocket::config::{Config as RocketConfig, Ident};
-use serde::Deserialize;
+use serde::{
+    de::{Error as DeError, Unexpected, Visitor},
+    Deserialize, Deserializer,
+};
 use std::{
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
 };
-use tracing::debug;
+use tracing::Level;
 
 //
+
+struct LogLevelVisitor();
+
+impl<'de> Visitor<'de> for LogLevelVisitor {
+    type Value = Level;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            formatter,
+            "one of \"error\", \"warn\", \"info\", \"debug\" or \"trace\""
+        )
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(match v {
+            "error" => Level::ERROR,
+            "warn" => Level::WARN,
+            "info" => Level::INFO,
+            "debug" => Level::DEBUG,
+            "trace" => Level::TRACE,
+            _ => return Err(DeError::invalid_value(Unexpected::Str(v), &self)),
+        })
+    }
+}
+
+fn deserialize_log_level<'de, D>(deserializerd: D) -> Result<Level, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserializerd.deserialize_str(LogLevelVisitor())
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct General {
     // FIXME force to be absolute
     pub settings_path: PathBuf,
+    #[serde(deserialize_with = "deserialize_log_level")]
+    pub log_level: Level,
 }
 
 impl Default for General {
     fn default() -> Self {
         Self {
             settings_path: PathBuf::from(format!("/var/lib/{}/settings.json", APP_NAME)),
+            log_level: Level::WARN,
         }
     }
 }
@@ -130,15 +167,12 @@ pub struct Config {
 
 //
 
-pub fn config() -> Result<Config> {
-    let args = Args::parse();
-    debug!("Args are: {:?}", args);
+pub fn config(args: &Args) -> Result<Config> {
     let cfg = Figment::new()
         .merge(Toml::file(&args.cfg))
         .merge(&args)
         .extract()?;
     // TODO add sanitycheck, e.g. to verify that the motor values aren't higher
     // than the limits etc.
-    debug!("Config is: {:?}", cfg);
     Ok(cfg)
 }
