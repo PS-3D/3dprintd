@@ -1,3 +1,4 @@
+use crate::log::target;
 use anyhow::Result;
 use gcode::{full_parse_with_callbacks, Callbacks, GCode as InnerGCode, Mnemonic, Span, Word};
 use std::{
@@ -8,6 +9,7 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct GCodeSpan {
@@ -223,6 +225,13 @@ impl<R: Read> Parser<R> {
         let line_n_start = self.next_line;
         let line_n_end = line_n_start + n;
         self.next_line = line_n_end;
+        debug!(
+            target: target::INTERNAL,
+            "Parsing lines {} to {} of {}",
+            line_n_start,
+            line_n_end,
+            self.path.display()
+        );
         for i in line_n_start..self.next_line {
             if let Some(line) = self.reader.next() {
                 let line = match line {
