@@ -4,15 +4,16 @@ use self::error::{MotorError, MotorsError};
 use super::super::comms::{AxisMovement, ExtruderMovement, Movement};
 use crate::{
     comms::{OnewayAtomicF64Read, OnewayAtomicF64Write, ReferenceRunOptParameters},
-    config::Config,
+    config::{AxisMotor as AxisMotorConfig, Config, ExtruderMotor as ExtruderMotorConfig},
     settings::Settings,
 };
 use anyhow::{ensure, Context, Result};
 #[cfg(not(feature = "dev_no_motors"))]
 use nanotec_stepper_driver::EStop;
 use nanotec_stepper_driver::{
-    AllMotor, Driver, DriverError, Ignore, LimitSwitchBehavior, Motor, MotorStatus,
-    PositioningMode, Repetitions, RespondMode, ResponseHandle, RotationDirection, SendAutoStatus,
+    AllMotor, Driver, DriverError, ErrorCorrectionMode, Ignore, LimitSwitchBehavior,
+    LimitSwitchBehaviorNormal, LimitSwitchBehaviorReference, Motor, MotorStatus, PositioningMode,
+    RampType, Repetitions, RespondMode, ResponseHandle, SendAutoStatus,
 };
 use std::time::Duration;
 
@@ -47,7 +48,6 @@ macro_rules! make_reference_motor {
         ) -> Result<()> {
             Motors::reference_motor(
                 &mut self.$axis.motor,
-                settings.config().motors.$axis.endstop_direction,
                 params
                     .speed
                     .unwrap_or(settings.motors().$axis().get_reference_speed()),
@@ -112,27 +112,106 @@ impl Motors {
     }
 
     pub fn init(&mut self) -> Result<()> {
-        let cfg = self.settings.config();
-        self.x
-            .motor
-            .set_quickstop_ramp_no_conversion(cfg.motors.x.quickstop_ramp)?
-            .wait()
-            .ignore()?;
-        self.y
-            .motor
-            .set_quickstop_ramp_no_conversion(cfg.motors.y.quickstop_ramp)?
-            .wait()
-            .ignore()?;
-        self.z
-            .motor
-            .set_accel_ramp_no_conversion(cfg.motors.z.quickstop_ramp)?
-            .wait()
-            .ignore()?;
-        self.e
-            .set_accel_ramp_no_conversion(cfg.motors.e.quickstop_ramp)?
-            .wait()
-            .ignore()?;
-        // FIXME init positioningmode, turningdirection, etc.
+        fn init_axis(motor: &mut Motor<SendAutoStatus>, config: &AxisMotorConfig) -> Result<()> {
+            motor.set_step_mode(config.step_size)?.wait().ignore()?;
+            // Maybe change normal limit switch behavior to all stop or all ignore?
+            motor
+                .set_limit_switch_behavior(LimitSwitchBehavior {
+                    internal_reference: LimitSwitchBehaviorReference::FreeTravelBackwards,
+                    internal_normal: LimitSwitchBehaviorNormal::Ignore,
+                    external_reference: LimitSwitchBehaviorReference::FreeTravelBackwards,
+                    external_normal: LimitSwitchBehaviorNormal::Stop,
+                })?
+                .wait()
+                .ignore()?;
+            motor
+                .set_error_correction_mode(ErrorCorrectionMode::Off)?
+                .wait()
+                .ignore()?;
+            // TODO maybe set swing out time?
+            // TODO maybe set max encoder deviation?
+            // TODO maybe change ramptype and see how it performs
+            motor
+                .set_ramp_type(RampType::Trapezoidal)?
+                .wait()
+                .ignore()?;
+            // TODO maybe set waiting time to switch off brake voltage?
+            // TODO maybe set waiting time for motor movement?
+            // TODO maybe set waiting time for switching off motor current?
+            motor
+                .set_quickstop_ramp_no_conversion(config.quickstop_ramp)?
+                .wait()
+                .ignore()?;
+            motor
+                .set_positioning_mode(PositioningMode::Absolute)?
+                .wait()
+                .ignore()?;
+            // set min frequency here so we dont have to set it later, which
+            // saves commands to send to the motor
+            motor.set_min_frequency(1)?.wait().ignore()?;
+            motor
+                .set_rotation_direction(config.endstop_direction)?
+                .wait()
+                .ignore()?;
+            motor
+                .set_rotation_direction_change(false)?
+                .wait()
+                .ignore()?;
+            motor.set_repetitions(Repetitions::N(1))?.wait().ignore()?;
+            motor.set_continuation_record(None)?.wait().ignore()?;
+            Ok(())
+        }
+        fn init_extruder(
+            motor: &mut Motor<SendAutoStatus>,
+            config: &ExtruderMotorConfig,
+        ) -> Result<()> {
+            motor.set_step_mode(config.step_size)?.wait().ignore()?;
+            // Maybe change normal limit switch behavior to all stop or all ignore?
+            motor
+                .set_limit_switch_behavior(LimitSwitchBehavior {
+                    internal_reference: LimitSwitchBehaviorReference::FreeTravelBackwards,
+                    internal_normal: LimitSwitchBehaviorNormal::Ignore,
+                    external_reference: LimitSwitchBehaviorReference::FreeTravelBackwards,
+                    external_normal: LimitSwitchBehaviorNormal::Stop,
+                })?
+                .wait()
+                .ignore()?;
+            motor
+                .set_error_correction_mode(ErrorCorrectionMode::Off)?
+                .wait()
+                .ignore()?;
+            // TODO maybe set swing out time?
+            // TODO maybe set max encoder deviation?
+            // TODO maybe change ramptype and see how it performs
+            motor
+                .set_ramp_type(RampType::Trapezoidal)?
+                .wait()
+                .ignore()?;
+            // TODO maybe set waiting time to switch off brake voltage?
+            // TODO maybe set waiting time for motor movement?
+            // TODO maybe set waiting time for switching off motor current?
+            motor
+                .set_quickstop_ramp_no_conversion(config.quickstop_ramp)?
+                .wait()
+                .ignore()?;
+            motor
+                .set_positioning_mode(PositioningMode::Absolute)?
+                .wait()
+                .ignore()?;
+            motor.set_min_frequency(1)?.wait().ignore()?;
+            motor
+                .set_rotation_direction_change(false)?
+                .wait()
+                .ignore()?;
+            motor.set_repetitions(Repetitions::N(1))?.wait().ignore()?;
+            motor.set_continuation_record(None)?.wait().ignore()?;
+            Ok(())
+        }
+        let cfg = &self.settings.config().motors;
+        init_axis(&mut self.x.motor, &cfg.x)?;
+        init_axis(&mut self.y.motor, &cfg.y)?;
+        init_axis(&mut self.z.motor, &cfg.z)?;
+        init_extruder(&mut self.e, &cfg.e)?;
         Ok(())
     }
 
@@ -154,7 +233,6 @@ impl Motors {
 
     fn reference_motor(
         motor: &mut Motor<SendAutoStatus>,
-        direction: RotationDirection,
         speed: u32,
         accel: u32,
         jerk: u32,
@@ -163,24 +241,19 @@ impl Motors {
             .set_positioning_mode(PositioningMode::ExternalReference)?
             .wait()
             .ignore()?;
-        motor
-            .set_limit_switch_behavior(LimitSwitchBehavior::default())?
-            .wait()
-            .ignore()?;
-        motor.set_rotation_direction(direction)?.wait().ignore()?;
-        motor.set_min_frequency(1)?.wait().ignore()?;
+        // don't set min frequency, since that is alwyas the same and we already
+        // set it
         motor.set_max_frequency(speed)?.wait().ignore()?;
-        motor
-            .set_rotation_direction_change(false)?
-            .wait()
-            .ignore()?;
-        motor.set_repetitions(Repetitions::N(1))?.wait().ignore()?;
-        motor.set_continuation_record(None)?.wait().ignore()?;
         motor.set_accel_ramp_no_conversion(accel)?.wait().ignore()?;
         motor.set_brake_ramp_no_conversion(accel)?.wait().ignore()?;
         motor.set_max_accel_jerk(jerk)?.wait().ignore()?;
         motor.set_max_brake_jerk(jerk)?.wait().ignore()?;
         let status = motor.start_motor()?.wait().ignore()?.wait().ignore()?;
+        // reset values to what they were before, see also init_motor
+        motor
+            .set_positioning_mode(PositioningMode::Absolute)?
+            .wait()
+            .ignore()?;
         ensure!(
             status == MotorStatus::Ready,
             "motor error while referencing, status was {}",
@@ -227,7 +300,8 @@ impl Motors {
             // if distance is set to 0, ignore setting the other values, it means
             // the motor won't move anyways
             if am.distance != 0 {
-                motor.set_min_frequency(am.min_frequency)?.wait().unwrap();
+                // don't set min frequency, since that is alwyas the same and we already
+                // set it
                 motor.set_max_frequency(am.max_frequency)?.wait().unwrap();
                 motor
                     .set_accel_ramp_no_conversion(am.acceleration)?
@@ -260,7 +334,8 @@ impl Motors {
             // the motor won't move anyways
             if em.distance != 0 {
                 motor.set_rotation_direction(em.direction)?.wait().unwrap();
-                motor.set_min_frequency(em.min_frequency)?.wait().unwrap();
+                // don't set min frequency, since that is alwyas the same and we already
+                // set it
                 motor.set_max_frequency(em.max_frequency)?.wait().unwrap();
                 motor
                     .set_accel_ramp_no_conversion(em.acceleration)?
