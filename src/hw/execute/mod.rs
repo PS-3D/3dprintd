@@ -20,6 +20,7 @@ use crate::{
     util::send_err,
 };
 use anyhow::{Context, Error, Result};
+use atomic_float::AtomicF64;
 use crossbeam::{
     channel::{self, Receiver, Sender, TryRecvError},
     select,
@@ -139,15 +140,21 @@ impl State {
     }
 }
 
+// shared_z_hotend_location is location of the hotend on the z axis, assuming
+// zero point is at endstop shared with the executor thread, only to calculate
+// the z position properly
+// the actual z_hotend_location is set seperately and is not an atomic because
+// it doesn't need to be
 fn executor_loop(
     settings: Settings,
     mut exec: Executor,
     executor_ctrl_recv: Receiver<ControlComms<ExecutorCtrlComms>>,
     executor_manual_recv: Receiver<ExecutorManualComms>,
     shared_z_pos_raw: Arc<AtomicI32>,
+    shared_z_hotend_location: Arc<AtomicF64>,
     error_send: Sender<ControlComms<Error>>,
 ) {
-    let mut state = State::new(-(settings.config().motors.z.limit as f64));
+    let mut state = State::new(shared_z_hotend_location.load(Ordering::Acquire));
     // has to be macro so break will work
     macro_rules! handle_ctrl_msg {
         ($msg:expr) => {{
@@ -223,7 +230,10 @@ fn executor_loop(
                     ExecutorManualComms::ReferenceZAxisHotend => {
                         let pos_steps = shared_z_pos_raw.load(Ordering::Acquire);
                         let pos_mm = settings.config().motors.z.steps_to_mm(pos_steps);
-                        state.decoder_state_mut().set_z_hotend_location(pos_mm)
+                        state.decoder_state_mut().set_z_hotend_location(pos_mm);
+                        // update shared location to be able to properly calculate
+                        // the position of the z axis in ExecutorCtrl
+                        shared_z_hotend_location.store(pos_mm, Ordering::Release)
                     }
                 }
             }
@@ -243,6 +253,9 @@ pub fn start(
     let settings_clone = settings.clone();
     let shared_pos = SharedRawPos::default();
     let shared_pos_clone = shared_pos.clone();
+    let shared_z_hotend_location =
+        Arc::new(AtomicF64::new(-(settings.config().motors.z.limit as f64)));
+    let shared_z_hotend_location_clone = shared_z_hotend_location.clone();
     // do it this way all in the executorhread because we can't send motors between
     // threads. We then send the result of the setup via the above channel.
     // the setup is all in a function so we can use the ? operator for convenience
@@ -293,6 +306,7 @@ pub fn start(
                         executor_ctrl_recv,
                         executor_manual_recv,
                         shared_z_pos_raw,
+                        shared_z_hotend_location_clone,
                         error_send,
                     );
                 }
@@ -311,6 +325,7 @@ pub fn start(
             executor_ctrl_send,
             executor_manual_send,
             shared_pos,
+            shared_z_hotend_location,
         ),
     ))
 }

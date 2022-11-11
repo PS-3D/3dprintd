@@ -5,6 +5,7 @@ use crate::{
     util::ensure_own,
 };
 use anyhow::{Context, Result};
+use atomic_float::AtomicF64;
 use crossbeam::channel::Sender;
 use std::{
     fs::File,
@@ -27,6 +28,9 @@ pub struct ExecutorCtrl {
     executor_manual_send: Sender<ExecutorManualComms>,
     line: Arc<AtomicUsize>,
     shared_pos: SharedRawPos,
+    // location of the hotend on the z axis, assuming zero point is at endstop
+    // shared with the executor thread, only to calculate the z position properly
+    shared_z_hotend_location: Arc<AtomicF64>,
 }
 
 impl ExecutorCtrl {
@@ -35,6 +39,7 @@ impl ExecutorCtrl {
         executor_ctrl_send: Sender<ControlComms<ExecutorCtrlComms>>,
         executor_manual_send: Sender<ExecutorManualComms>,
         shared_pos: SharedRawPos,
+        shared_z_hotend_location: Arc<AtomicF64>,
     ) -> Self {
         Self {
             settings,
@@ -42,6 +47,7 @@ impl ExecutorCtrl {
             executor_manual_send,
             line: Arc::new(AtomicUsize::new(0)),
             shared_pos,
+            shared_z_hotend_location,
         }
     }
 
@@ -95,6 +101,8 @@ impl ExecutorCtrl {
             .motors
             .z
             .steps_to_mm(self.shared_pos.z.load(Ordering::Acquire))
+            // must be subtraction because z_hotend_location is already negative
+            - self.shared_z_hotend_location.load(Ordering::Acquire)
     }
 
     pub fn reference_axis(
