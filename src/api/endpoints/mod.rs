@@ -3,7 +3,7 @@ pub mod error;
 pub mod gcode;
 pub mod heating;
 
-use crate::{ api::values::ApiError, hw::HwCtrl};
+use crate::{api::values::ApiError, hw::HwCtrl};
 use rocket::{catch, data::FromData, post, response::status, serde::json::Json, Responder, State};
 
 pub(self) type JsonResult<'r, T> = Result<Json<T>, <Json<T> as FromData<'r>>::Error>;

@@ -1,14 +1,20 @@
+mod control;
 mod executor;
 mod motors;
 
-use self::{executor::Executor, motors::Motors};
-use super::{
-    comms::{Action, EStopComms, ExecutorCtrl},
-    pi::PiCtrl,
+pub use self::control::{ExecutorCtrl, OutOfBoundsError};
+use self::{
+    super::{
+        comms::EStopComms,
+        decode::State as DecoderState,
+        decode::{Decoder, FileDecoder, ThreadedDecoder},
+        pi::PiCtrl,
+    },
+    executor::Executor,
+    motors::Motors,
 };
 use crate::{
-    comms::{ControlComms, OnewayAtomicF64Read},
-    hw::comms::OnewayPosRead,
+    comms::{Axis, ControlComms, ReferenceRunOptParameters},
     log::target,
     settings::Settings,
     util::send_err,
@@ -19,36 +25,149 @@ use crossbeam::{
     select,
 };
 use std::{
-    sync::atomic::Ordering,
+    fs::File,
+    mem,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicI32, AtomicUsize, Ordering},
+        Arc,
+    },
     thread::{self, JoinHandle},
 };
 use tracing::{debug, info};
 
+enum ExecutorCtrlComms {
+    /// sends the already open file, the path to that file (for error messages)
+    /// and an atomic that the currently executed line will be written into by
+    /// the executor
+    Print(File, PathBuf, Arc<AtomicUsize>),
+    Stop,
+    Play,
+    Pause,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(self) struct SharedRawPos {
+    x: Arc<AtomicI32>,
+    y: Arc<AtomicI32>,
+    z: Arc<AtomicI32>,
+}
+
+enum ExecutorManualComms {
+    ReferenceAxis(Axis, ReferenceRunOptParameters),
+    ReferenceZAxisHotend,
+}
+
+enum InnerState {
+    Printing,
+    Paused,
+    Stopped(DecoderState),
+}
+
+pub(self) struct PrintingData {
+    pub decoder: ThreadedDecoder<FileDecoder>,
+    pub line: Arc<AtomicUsize>,
+}
+
+struct State {
+    inner: InnerState,
+    data: Option<PrintingData>,
+}
+
+impl State {
+    pub fn new(z_hotend_location: f64) -> Self {
+        Self {
+            inner: InnerState::Stopped(DecoderState::new(z_hotend_location)),
+            data: None,
+        }
+    }
+
+    pub fn print(&mut self, settings: Settings, file: File, path: PathBuf, line: Arc<AtomicUsize>) {
+        match &self.inner {
+            InnerState::Stopped(_) => {
+                let decoder_state = match mem::replace(&mut self.inner, InnerState::Printing) {
+                    InnerState::Stopped(ds) => ds,
+                    _ => unreachable!(),
+                };
+                let decoder = ThreadedDecoder::new(FileDecoder::with_state_and_file(
+                    settings,
+                    decoder_state,
+                    file,
+                    path,
+                ))
+                .expect("starting the decoder thread failed");
+                self.data = Some(PrintingData { decoder, line })
+            }
+            _ => panic!("printer is already printing/paused"),
+        }
+    }
+
+    pub fn stop(&mut self) {
+        match self.inner {
+            InnerState::Stopped(_) => (),
+            _ => {
+                let mut decoder_state = self.data.take().unwrap().decoder.state();
+                decoder_state.reset();
+                self.inner = InnerState::Stopped(decoder_state);
+            }
+        }
+    }
+
+    pub fn play(&mut self) {
+        match self.inner {
+            InnerState::Stopped(_) => panic!("can't continue, printer is stopped"),
+            _ => self.inner = InnerState::Printing,
+        }
+    }
+
+    pub fn pause(&mut self) {
+        match self.inner {
+            InnerState::Stopped(_) => panic!("can't continue, printer is stopped"),
+            _ => self.inner = InnerState::Paused,
+        }
+    }
+
+    pub fn decoder_mut(&mut self) -> Option<&mut PrintingData> {
+        self.data.as_mut()
+    }
+
+    pub fn decoder_state_mut(&mut self) -> &mut DecoderState {
+        match &mut self.inner {
+            InnerState::Stopped(decoder_state) => decoder_state,
+            _ => panic!("can't read decoder state, printer isn't stopped"),
+        }
+    }
+}
+
 fn executor_loop(
+    settings: Settings,
     mut exec: Executor,
-    executor_ctrl_recv: Receiver<ControlComms<ExecutorCtrl>>,
-    executor_manual_recv: Receiver<Action>,
+    executor_ctrl_recv: Receiver<ControlComms<ExecutorCtrlComms>>,
+    executor_manual_recv: Receiver<ExecutorManualComms>,
+    shared_z_pos_raw: Arc<AtomicI32>,
     error_send: Sender<ControlComms<Error>>,
 ) {
-    let mut gcode = None;
+    let mut state = State::new(-(settings.config().motors.z.limit as f64));
     // has to be macro so break will work
     macro_rules! handle_ctrl_msg {
         ($msg:expr) => {{
             match $msg {
                 ControlComms::Msg(c) => match c {
-                    ExecutorCtrl::GCode(gcode_recv, line) => {
-                        debug!(
-                            target: target::INTERNAL,
-                            "executor thread switching to gcode"
-                        );
-                        gcode = Some((gcode_recv, line))
+                    ExecutorCtrlComms::Print(file, path, line) => {
+                        debug!(target: target::INTERNAL, "executor thread starting print");
+                        state.print(settings.clone(), file, path, line);
                     }
-                    ExecutorCtrl::Manual => {
-                        debug!(
-                            target: target::INTERNAL,
-                            "executor thread switching to manual"
-                        );
-                        gcode = None
+                    ExecutorCtrlComms::Stop => {
+                        debug!(target: target::INTERNAL, "executor thread stopping");
+                        state.stop();
+                    }
+                    ExecutorCtrlComms::Play => {
+                        debug!(target: target::INTERNAL, "executor thread contiuing");
+                        state.play();
+                    }
+                    ExecutorCtrlComms::Pause => {
+                        debug!(target: target::INTERNAL, "executor thread pausing");
+                        state.pause();
                     }
                 },
                 ControlComms::Exit => {
@@ -74,29 +193,39 @@ fn executor_loop(
                 }
             },
         }
-        if let Some((gcode_recv, line)) = gcode.as_ref() {
-            select! {
-                recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
-                recv(gcode_recv) -> msg => {
-                    // we need the Exit here as well, because that means
-                    // that the gcode finished. We can't use exec_ctrl for this
-                    // because we might get the message before we executed
-                    // all messages from the gcode buffer
-                    match msg.unwrap() {
-                        ControlComms::Msg((action, code)) => {
-                            // FIXME maybe use Ordering::Relaxed since it doesn't really matter?
-                            line.store(code.span().line(), Ordering::Release);
-                            debug!(target: target::PUBLIC, "Executing {}", code);
-                            send_err!(exec.exec(action), error_send)
-                        },
-                        ControlComms::Exit => gcode = None,
+        if let Some(printing_data) = state.decoder_mut() {
+            if let Some(res) = printing_data.decoder.next() {
+                let (action, code) = match res {
+                    Ok(t) => t,
+                    Err(e) => {
+                        // FIXME alert hwctrl of error
+                        error_send.send(ControlComms::Msg(e.into())).unwrap();
+                        state.stop();
+                        continue;
                     }
-                },
+                };
+                // FIXME maybe use Ordering::Relaxed since it doesn't really matter?
+                printing_data
+                    .line
+                    .store(code.span().line(), Ordering::Release);
+                debug!(target: target::PUBLIC, "Executing {}", code);
+                send_err!(exec.exec(action), error_send)
+            } else {
+                // FIXME alert hwctrl of finish
+                state.stop();
             }
         } else {
+            // TODO run manual movement commands through decoder somehow
             select! {
                 recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
-                recv(executor_manual_recv) -> msg => send_err!(exec.exec(msg.unwrap()), error_send)
+                recv(executor_manual_recv) -> msg => match msg.unwrap() {
+                    ExecutorManualComms::ReferenceAxis(axis, parameters) => send_err!(exec.exec_reference_axis(axis, parameters), error_send),
+                    ExecutorManualComms::ReferenceZAxisHotend => {
+                        let pos_steps = shared_z_pos_raw.load(Ordering::Acquire);
+                        let pos_mm = settings.config().motors.z.steps_to_mm(pos_steps);
+                        state.decoder_state_mut().set_z_hotend_location(pos_mm)
+                    }
+                }
             }
         }
     }
@@ -105,17 +234,15 @@ fn executor_loop(
 pub fn start(
     settings: Settings,
     pi_ctrl: PiCtrl,
-    executor_ctrl_recv: Receiver<ControlComms<ExecutorCtrl>>,
-    executor_manual_recv: Receiver<Action>,
     estop_recv: Receiver<ControlComms<EStopComms>>,
     error_send: Sender<ControlComms<Error>>,
-) -> Result<(
-    JoinHandle<()>,
-    JoinHandle<()>,
-    OnewayPosRead,
-    OnewayAtomicF64Read,
-)> {
+) -> Result<(JoinHandle<()>, JoinHandle<()>, ExecutorCtrl)> {
+    let (executor_ctrl_send, executor_ctrl_recv) = channel::unbounded();
+    let (executor_manual_send, executor_manual_recv) = channel::unbounded();
     let (setup_send, setup_recv) = channel::bounded(1);
+    let settings_clone = settings.clone();
+    let shared_pos = SharedRawPos::default();
+    let shared_pos_clone = shared_pos.clone();
     // do it this way all in the executorhread because we can't send motors between
     // threads. We then send the result of the setup via the above channel.
     // the setup is all in a function so we can use the ? operator for convenience
@@ -125,8 +252,9 @@ pub fn start(
             fn setup(
                 settings: &Settings,
                 estop_recv: Receiver<ControlComms<EStopComms>>,
+                shared_pos: SharedRawPos,
             ) -> Result<(Motors, JoinHandle<()>)> {
-                let (mut motors, mut estop) = Motors::new(settings.clone())?;
+                let (mut motors, mut estop) = Motors::new(settings.clone(), shared_pos)?;
                 let estop_handle = thread::Builder::new()
                     .name(String::from("estop"))
                     .spawn(move || {
@@ -154,21 +282,17 @@ pub fn start(
                 motors.init()?;
                 Ok((motors, estop_handle))
             }
-            match setup(&settings, estop_recv) {
+            let shared_z_pos_raw = Arc::clone(&shared_pos_clone.z);
+            match setup(&settings, estop_recv, shared_pos_clone) {
                 Ok((motors, estop_handle)) => {
-                    let oneway_pos_read = OnewayPosRead {
-                        x: motors.x_pos_mm_read(),
-                        y: motors.y_pos_mm_read(),
-                        z: motors.z_pos_mm_read(),
-                    };
-                    let (executor, z_hotend_location) = Executor::new(settings, motors, pi_ctrl);
-                    setup_send
-                        .send(Ok((estop_handle, oneway_pos_read, z_hotend_location)))
-                        .unwrap();
+                    let executor = Executor::new(settings.clone(), motors, pi_ctrl);
+                    setup_send.send(Ok(estop_handle)).unwrap();
                     executor_loop(
+                        settings,
                         executor,
                         executor_ctrl_recv,
                         executor_manual_recv,
+                        shared_z_pos_raw,
                         error_send,
                     );
                 }
@@ -178,11 +302,15 @@ pub fn start(
             }
         })
         .context("Creating the executor thread failed")?;
-    let (estop_handle, oneway_data_read, z_hotend_location) = setup_recv.recv().unwrap()?;
+    let estop_handle = setup_recv.recv().unwrap()?;
     Ok((
         executor_handle,
         estop_handle,
-        oneway_data_read,
-        z_hotend_location,
+        ExecutorCtrl::new(
+            settings_clone,
+            executor_ctrl_send,
+            executor_manual_send,
+            shared_pos,
+        ),
     ))
 }

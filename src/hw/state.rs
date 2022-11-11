@@ -1,11 +1,4 @@
-use serde::Serialize;
-use std::{
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-};
+use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -24,17 +17,10 @@ pub enum StateError {
     Stopped,
 }
 
-#[derive(Debug, Serialize)]
-pub struct PrintingStateInfo {
-    pub path: PathBuf,
-    pub line: usize,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "status", rename_all = "lowercase")]
+#[derive(Debug)]
 pub enum StateInfo {
-    Printing(PrintingStateInfo),
-    Paused(PrintingStateInfo),
+    Printing(PathBuf),
+    Paused(PathBuf),
     Stopped,
 }
 
@@ -42,10 +28,6 @@ pub enum StateInfo {
 pub struct PrintingState {
     // path of the file that is currently being printed
     pub path: PathBuf,
-    // line of gcode that the executor is currently executing
-    // the other end of that atomic is in the executor thread
-    // this one should be read-only
-    pub current_line: Arc<AtomicUsize>,
 }
 
 #[derive(Debug)]
@@ -73,11 +55,7 @@ impl State {
         macro_rules! construct_printing_paused {
             ($variant:ident) => {{
                 let printing_state = self.printing_state.as_ref().unwrap();
-                StateInfo::$variant(PrintingStateInfo {
-                    path: printing_state.path.clone(),
-                    // FIXME maybe use Ordering::Relaxed since it doesn't really matter?
-                    line: printing_state.current_line.load(Ordering::Acquire),
-                })
+                StateInfo::$variant(printing_state.path.clone())
             }};
         }
         match self.state {
@@ -87,17 +65,13 @@ impl State {
         }
     }
 
-    pub fn print(&mut self, path: PathBuf) -> &Arc<AtomicUsize> {
+    pub fn print(&mut self, path: PathBuf) {
         match self.state {
             InnerState::Printing => panic!("can't print, already printing"),
             InnerState::Paused => panic!("can't print, is paused"),
             InnerState::Stopped => {
                 self.state = InnerState::Printing;
-                self.printing_state = Some(PrintingState {
-                    path,
-                    current_line: Arc::new(AtomicUsize::new(1)),
-                });
-                &self.printing_state.as_ref().unwrap().current_line
+                self.printing_state = Some(PrintingState { path });
             }
         }
     }

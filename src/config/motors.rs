@@ -314,6 +314,14 @@ pub struct AxisMotor {
     pub default_reference_jerk: u32,
 }
 
+impl AxisMotor {
+    pub fn steps_to_mm(&self, steps: i32) -> f64 {
+        // 360 / 1.8 because every step is 1.8 degrees
+        let rotations = (steps as f64) / ((360.0 / 1.8) * (self.step_size as u32 as f64));
+        rotations * self.translation
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ExtruderMotor {
     pub address: u8,

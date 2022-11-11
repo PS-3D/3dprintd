@@ -1,10 +1,6 @@
-use super::{
-    super::comms::{Action, AxisMovement, ExtruderMovement, Movement},
-    error::GCodeError,
-    parser::GCode,
-};
+use super::{error::GCodeError, parser::GCode, Action, AxisMovement, ExtruderMovement, Movement};
 use crate::{
-    comms::{Axis, OnewayAtomicF64Read, OnewayAtomicF64Write, ReferenceRunOptParameters},
+    comms::{Axis, ReferenceRunOptParameters},
     log::target,
     settings::Settings,
     util::{bail_own, ensure_own},
@@ -35,6 +31,93 @@ impl Unit {
             Self::Millimeters => val,
             Self::Inches => val * 25.4,
         }
+    }
+}
+
+#[derive(Debug)]
+struct GCodeState {
+    feedrate: Option<f64>,
+    x: f64,
+    y: f64,
+    z: f64,
+    e: f64,
+    xyz_coord_mode: CoordMode,
+    e_coord_mode: CoordMode,
+    unit: Unit,
+    hotend_target_temp: Option<u16>,
+    bed_target_temp: Option<u16>,
+}
+
+impl Default for GCodeState {
+    fn default() -> Self {
+        Self {
+            feedrate: None,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            e: 0.0,
+            xyz_coord_mode: CoordMode::Absolute,
+            e_coord_mode: CoordMode::Relative,
+            unit: Unit::Millimeters,
+            hotend_target_temp: None,
+            bed_target_temp: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ActualState {
+    x: f64,
+    y: f64,
+    z: f64,
+    steps_x: u32,
+    steps_y: u32,
+    // not u32, because z position operates in the negative since the
+    // endstop is at the positive end of the z-axis
+    steps_z: i32,
+    z_hotend_location: f64,
+}
+
+impl ActualState {
+    fn new(z_hotend_location: f64) -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            steps_x: 0,
+            steps_y: 0,
+            steps_z: 0,
+            z_hotend_location,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct State {
+    gcode: GCodeState,
+    actual: ActualState,
+}
+
+impl State {
+    /// Creates a new [`State`] object
+    ///
+    /// `z_hotend_location` is the location of the hotend relative to the z-axis
+    /// endstop. This means that it *must* be negative
+    pub fn new(z_hotend_location: f64) -> Self {
+        Self {
+            gcode: GCodeState::default(),
+            actual: ActualState::new(z_hotend_location),
+        }
+    }
+
+    /// Will reset values like the feedrate which should only persist in one
+    /// run
+    pub fn reset(&mut self) {
+        self.gcode = GCodeState::default();
+    }
+
+    pub fn set_z_hotend_location(&mut self, z_hotend_location: f64) {
+        self.actual.z_hotend_location = z_hotend_location
     }
 }
 
@@ -88,59 +171,19 @@ fn mm_to_steps(mm: f64, translation: &f64, step_size: &StepMode) -> f64 {
 #[derive(Debug)]
 pub struct Decoder {
     settings: Settings,
-    feedrate: Option<f64>,
-    prog_x: f64,
-    prog_y: f64,
-    prog_z: f64,
-    prog_e: f64,
-    actual_x: f64,
-    actual_y: f64,
-    actual_z: f64,
-    steps_x: u32,
-    steps_y: u32,
-    // not u32, because z position operates in the negative since the
-    // endstop is at the positive end of the z-axis
-    steps_z: i32,
-    xyz_coord_mode: CoordMode,
-    e_coord_mode: CoordMode,
-    unit: Unit,
-    hotend_target_temp: Option<u16>,
-    bed_target_temp: Option<u16>,
-    z_hotend_location: OnewayAtomicF64Read,
+    state: State,
 }
 
 impl Decoder {
-    pub fn new(settings: Settings, z_hotend_location: OnewayAtomicF64Read) -> Self {
-        let actual_z = z_hotend_location.read();
-        let steps_z = mm_to_steps(
-            actual_z,
-            &settings.config().motors.z.translation,
-            &settings.config().motors.z.step_size,
-        ) as i32;
+    pub fn new(settings: Settings, z_hotend_location: f64) -> Self {
         Self {
             settings,
-            feedrate: None,
-            prog_x: 0.0,
-            prog_y: 0.0,
-            prog_z: 0.0,
-            prog_e: 0.0,
-            actual_x: 0.0,
-            actual_y: 0.0,
-            actual_z,
-            steps_x: 0,
-            steps_y: 0,
-            steps_z,
-            xyz_coord_mode: CoordMode::Absolute,
-            e_coord_mode: CoordMode::Relative,
-            unit: Unit::Millimeters,
-            hotend_target_temp: None,
-            bed_target_temp: None,
-            z_hotend_location: OnewayAtomicF64Read::new(actual_z),
+            state: State::new(z_hotend_location),
         }
     }
 
-    pub fn get_z_hotend_location_write(&self) -> OnewayAtomicF64Write {
-        self.z_hotend_location.get_write()
+    pub fn with_state(settings: Settings, state: State) -> Self {
+        Self { settings, state }
     }
 
     fn g0_1(&mut self, code: GCode) -> GCodeResult<(Action, GCode)> {
@@ -148,6 +191,7 @@ impl Decoder {
             !code.arguments().is_empty(),
             GCodeError::MissingArguments(code)
         );
+        let state = &mut self.state;
         let mut x = None;
         let mut y = None;
         let mut z = None;
@@ -163,7 +207,7 @@ impl Decoder {
                 _ => bail_own!(GCodeError::UnknownArgument(*arg, code)),
             };
             ensure_own!(letter.is_none(), GCodeError::DuplicateArgument(*arg, code));
-            *letter = Some(self.unit.in_mm(arg.value as f64));
+            *letter = Some(state.gcode.unit.in_mm(arg.value as f64));
         }
         let mut x = x.unwrap_or_default();
         let mut y = y.unwrap_or_default();
@@ -177,32 +221,32 @@ impl Decoder {
         }
 
         // make x, y and z relative so we can calculate with them
-        if self.xyz_coord_mode == CoordMode::Absolute {
-            calc_rel(&mut x, &mut self.prog_x);
-            calc_rel(&mut y, &mut self.prog_y);
-            calc_rel(&mut z, &mut self.prog_z);
+        if state.gcode.xyz_coord_mode == CoordMode::Absolute {
+            calc_rel(&mut x, &mut state.gcode.x);
+            calc_rel(&mut y, &mut state.gcode.y);
+            calc_rel(&mut z, &mut state.gcode.z);
         } else {
-            self.prog_x += x;
-            self.prog_x += y;
-            self.prog_x += z;
+            state.gcode.x += x;
+            state.gcode.x += y;
+            state.gcode.x += z;
         }
         // make e relative so we can calculate with it
-        if self.e_coord_mode == CoordMode::Absolute {
-            calc_rel(&mut e, &mut self.prog_e);
+        if state.gcode.e_coord_mode == CoordMode::Absolute {
+            calc_rel(&mut e, &mut state.gcode.e);
         } else {
-            self.prog_e += e;
+            state.gcode.e += e;
         }
 
         let cfg = self.settings.config();
 
-        let actual_x_new = self.actual_x + x;
-        let actual_y_new = self.actual_y + y;
-        let actual_z_new = self.actual_z + z;
+        let actual_x_new = state.actual.x + x;
+        let actual_y_new = state.actual.y + y;
+        let actual_z_new = state.actual.z + z;
         // check lower limit
         ensure_own!(actual_x_new >= 0.0, GCodeError::PosOutOfBounds(code));
         ensure_own!(actual_y_new >= 0.0, GCodeError::PosOutOfBounds(code));
         ensure_own!(
-            actual_z_new >= self.z_hotend_location.read(),
+            actual_z_new >= state.actual.z_hotend_location,
             GCodeError::PosOutOfBounds(code)
         );
         // check upper limits
@@ -215,16 +259,17 @@ impl Decoder {
             GCodeError::PosOutOfBounds(code)
         );
         ensure_own!(actual_z_new <= 0.0, GCodeError::PosOutOfBounds(code));
-        self.actual_x = actual_x_new;
-        self.actual_y = actual_y_new;
-        self.actual_z = actual_z_new;
+        state.actual.x = actual_x_new;
+        state.actual.y = actual_y_new;
+        state.actual.z = actual_z_new;
 
         // save the feedrate for the next instructions
         // unfortunately this seems to be widely used in gcode
         if let Some(f) = f {
-            self.feedrate = Some(f as f64);
+            state.gcode.feedrate = Some(f as f64);
         }
-        let f = self
+        let f = state
+            .gcode
             .feedrate
             .ok_or(GCodeError::MissingArguments(code.clone()))?;
 
@@ -290,9 +335,9 @@ impl Decoder {
         // decel jerk in steps/s^3
         let (j1_x, j1_y, j1_z, j1_e) = calc_by_choosing!(decel_jerk_limit, a1_x, a1_y, a1_z, a1_e);
 
-        self.steps_x += x as u32;
-        self.steps_y += y as u32;
-        self.steps_z += z as i32;
+        state.actual.steps_x += x as u32;
+        state.actual.steps_y += y as u32;
+        state.actual.steps_z += z as i32;
 
         let mut e_direction = cfg.motors.e.positive_direction;
         if e < 0.0 {
@@ -301,7 +346,7 @@ impl Decoder {
 
         let movement = Movement {
             x: AxisMovement {
-                distance: self.steps_x as i32,
+                distance: state.actual.steps_x as i32,
                 min_frequency: 1,
                 max_frequency: v_x as u32,
                 acceleration: a0_x as u32,
@@ -310,7 +355,7 @@ impl Decoder {
                 deceleration_jerk: j1_x as u32,
             },
             y: AxisMovement {
-                distance: self.steps_y as i32,
+                distance: state.actual.steps_y as i32,
                 min_frequency: 1,
                 max_frequency: v_y as u32,
                 acceleration: a0_y as u32,
@@ -319,7 +364,7 @@ impl Decoder {
                 deceleration_jerk: j1_y as u32,
             },
             z: AxisMovement {
-                distance: self.steps_z,
+                distance: state.actual.steps_z,
                 min_frequency: 1,
                 max_frequency: v_z as u32,
                 acceleration: a0_z as u32,
@@ -414,7 +459,7 @@ impl Decoder {
             code.arguments().is_empty(),
             GCodeError::UnknownArgument(*code.arguments().first().unwrap(), code)
         );
-        self.unit = Unit::Inches;
+        self.state.gcode.unit = Unit::Inches;
         Ok(())
     }
 
@@ -427,7 +472,7 @@ impl Decoder {
             code.arguments().is_empty(),
             GCodeError::UnknownArgument(*code.arguments().first().unwrap(), code)
         );
-        self.unit = Unit::Millimeters;
+        self.state.gcode.unit = Unit::Millimeters;
         Ok(())
     }
 
@@ -486,7 +531,7 @@ impl Decoder {
             code.arguments().is_empty(),
             GCodeError::UnknownArgument(*code.arguments().first().unwrap(), code)
         );
-        self.xyz_coord_mode = CoordMode::Absolute;
+        self.state.gcode.xyz_coord_mode = CoordMode::Absolute;
         Ok(())
     }
 
@@ -499,7 +544,7 @@ impl Decoder {
             code.arguments().is_empty(),
             GCodeError::UnknownArgument(*code.arguments().first().unwrap(), code)
         );
-        self.xyz_coord_mode = CoordMode::Relative;
+        self.state.gcode.xyz_coord_mode = CoordMode::Relative;
         Ok(())
     }
 
@@ -520,6 +565,7 @@ impl Decoder {
         let mut y = None;
         let mut z = None;
         let mut e = None;
+        let state = &mut self.state;
         for arg in code.arguments() {
             let letter = match arg.letter {
                 'X' => &mut x,
@@ -529,12 +575,12 @@ impl Decoder {
                 _ => bail_own!(GCodeError::UnknownArgument(*arg, code)),
             };
             ensure_own!(letter.is_none(), GCodeError::DuplicateArgument(*arg, code));
-            *letter = Some(self.unit.in_mm(arg.value as f64));
+            *letter = Some(state.gcode.unit.in_mm(arg.value as f64));
         }
-        self.prog_x = x.unwrap_or(self.prog_x);
-        self.prog_y = y.unwrap_or(self.prog_y);
-        self.prog_z = z.unwrap_or(self.prog_z);
-        self.prog_e = e.unwrap_or(self.prog_e);
+        state.gcode.x = x.unwrap_or(state.gcode.x);
+        state.gcode.y = y.unwrap_or(state.gcode.y);
+        state.gcode.z = z.unwrap_or(state.gcode.z);
+        state.gcode.e = e.unwrap_or(state.gcode.e);
         Ok(())
     }
 
@@ -547,7 +593,7 @@ impl Decoder {
             code.arguments().is_empty(),
             GCodeError::UnknownArgument(*code.arguments().first().unwrap(), code)
         );
-        self.e_coord_mode = CoordMode::Absolute;
+        self.state.gcode.e_coord_mode = CoordMode::Absolute;
         Ok(())
     }
 
@@ -560,7 +606,7 @@ impl Decoder {
             code.arguments().is_empty(),
             GCodeError::UnknownArgument(*code.arguments().first().unwrap(), code)
         );
-        self.e_coord_mode = CoordMode::Relative;
+        self.state.gcode.e_coord_mode = CoordMode::Relative;
         Ok(())
     }
 
@@ -571,8 +617,11 @@ impl Decoder {
         assert_code!(code, Miscellaneous, 104, 0);
         let cfg = &self.settings.config().hotend;
         let (target, code) = extract_temp_from_code(code, cfg.lower_limit, cfg.upper_limit)?;
-        self.hotend_target_temp = target;
-        Ok((Action::HotendTarget(self.hotend_target_temp), code))
+        self.state.gcode.hotend_target_temp = target;
+        Ok((
+            Action::HotendTarget(self.state.gcode.hotend_target_temp),
+            code,
+        ))
     }
 
     /// Executes M109 command
@@ -582,9 +631,12 @@ impl Decoder {
         assert_code!(code, Miscellaneous, 109, 0);
         let cfg = &self.settings.config().hotend;
         let (target, code) = extract_temp_from_code(code, cfg.lower_limit, cfg.upper_limit)?;
-        self.hotend_target_temp = target;
+        self.state.gcode.hotend_target_temp = target;
         let mut dq = VecDeque::with_capacity(2);
-        dq.push_back((Action::HotendTarget(self.hotend_target_temp), code.clone()));
+        dq.push_back((
+            Action::HotendTarget(self.state.gcode.hotend_target_temp),
+            code.clone(),
+        ));
         dq.push_back((Action::WaitHotendTarget, code));
         Ok(dq)
     }
@@ -596,8 +648,8 @@ impl Decoder {
         assert_code!(code, Miscellaneous, 140, 0);
         let cfg = &self.settings.config().bed;
         let (target, code) = extract_temp_from_code(code, cfg.lower_limit, cfg.upper_limit)?;
-        self.bed_target_temp = target;
-        Ok((Action::BedTarget(self.bed_target_temp), code))
+        self.state.gcode.bed_target_temp = target;
+        Ok((Action::BedTarget(self.state.gcode.bed_target_temp), code))
     }
 
     /// Executes M190 command
@@ -643,7 +695,7 @@ impl Decoder {
     pub fn decode(&mut self, code: GCode) -> GCodeResult<Option<VecDeque<(Action, GCode)>>> {
         trace!(
             target: target::INTERNAL,
-            feedrate = self.feedrate,
+            feedrate = self.state.gcode.feedrate,
             "Decoding {}",
             code,
         );
@@ -706,13 +758,10 @@ impl Decoder {
     // FIXME actual_pos might not match the actual real position of the printer,
     // which might then cause it to error out once the next gcode is started
     pub fn reset(&mut self) {
-        self.feedrate = None;
-        self.prog_x = self.actual_x;
-        self.prog_y = self.actual_y;
-        self.prog_z = self.actual_z;
-        self.prog_e = 0.0;
-        self.xyz_coord_mode = CoordMode::Absolute;
-        self.e_coord_mode = CoordMode::Relative;
-        self.unit = Unit::Millimeters;
+        self.state.reset()
+    }
+
+    pub fn state(self) -> State {
+        self.state
     }
 }

@@ -1,16 +1,17 @@
 use super::{
-    comms::{Action, EStopComms, ExecutorCtrl, OnewayPosRead},
-    decode::DecoderCtrl,
+    comms::EStopComms,
+    execute::{ExecutorCtrl, OutOfBoundsError},
     pi::PiCtrl,
-    state::{State, StateError, StateInfo},
+    state::{State, StateError, StateInfo as InnerStateInfo},
 };
 use crate::{
-    comms::{Axis, ControlComms, OnewayAtomicF64Read, ReferenceRunOptParameters},
+    comms::{Axis, ControlComms, ReferenceRunOptParameters},
     settings::Settings,
     util::ensure_own,
 };
 use anyhow::{ensure, Result};
-use crossbeam::channel::{self, Sender};
+use crossbeam::channel::Sender;
+use serde::Serialize;
 use std::{
     path::PathBuf,
     sync::{Arc, RwLock},
@@ -21,8 +22,32 @@ use thiserror::Error;
 pub enum TryReferenceError {
     #[error(transparent)]
     StateError(#[from] StateError),
-    #[error("{} was out of bounds, was {}, must be <= {}", .0, .1, .2)]
-    OutOfBoundsError(&'static str, u32, u32),
+    #[error(transparent)]
+    OutOfBoundsError(#[from] OutOfBoundsError),
+}
+
+#[derive(Debug, Serialize)]
+pub struct PrintingStateInfo {
+    path: PathBuf,
+    line: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum StateInfo {
+    Printing(PrintingStateInfo),
+    Paused(PrintingStateInfo),
+    Stopped,
+}
+
+impl StateInfo {
+    pub(self) fn new(state: InnerStateInfo, line: usize) -> Self {
+        match state {
+            InnerStateInfo::Printing(path) => Self::Printing(PrintingStateInfo { path, line }),
+            InnerStateInfo::Paused(path) => Self::Printing(PrintingStateInfo { path, line }),
+            InnerStateInfo::Stopped => Self::Stopped,
+        }
+    }
 }
 
 pub struct PositionInfo {
@@ -31,33 +56,19 @@ pub struct PositionInfo {
     pub z: f64,
 }
 
-impl From<&OnewayPosRead> for PositionInfo {
-    fn from(read: &OnewayPosRead) -> Self {
-        Self {
-            x: read.x.read(),
-            y: read.x.read(),
-            z: read.x.read(),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct HwCtrl {
     state: Arc<RwLock<State>>,
     settings: Settings,
-    decoder_ctrl: DecoderCtrl,
+    executor_ctrl: ExecutorCtrl,
     pi_ctrl: PiCtrl,
-    executor_ctrl_send: Sender<ControlComms<ExecutorCtrl>>,
-    executor_manual_send: Sender<Action>,
     estop_send: Sender<ControlComms<EStopComms>>,
-    oneway_pos_read: OnewayPosRead,
-    z_hotend_location: OnewayAtomicF64Read,
 }
 
 macro_rules! pos_info_axis {
-    ($func_name:ident, $axis:ident) => {
+    ($func_name:ident, $get_func:ident) => {
         pub fn $func_name(&self) -> f64 {
-            self.oneway_pos_read.$axis.read()
+            self.executor_ctrl.$get_func()
         }
     };
 }
@@ -65,37 +76,27 @@ macro_rules! pos_info_axis {
 impl HwCtrl {
     pub(super) fn new(
         settings: Settings,
-        decoder_ctrl: DecoderCtrl,
+        executor_ctrl: ExecutorCtrl,
         pi_ctrl: PiCtrl,
-        executor_ctrl_send: Sender<ControlComms<ExecutorCtrl>>,
-        executor_manual_send: Sender<Action>,
         estop_send: Sender<ControlComms<EStopComms>>,
-        oneway_pos_read: OnewayPosRead,
-        z_hotend_location: OnewayAtomicF64Read,
     ) -> Self {
         Self {
             state: Arc::new(RwLock::new(State::new())),
             settings,
-            decoder_ctrl,
-            executor_ctrl_send,
-            executor_manual_send,
-            estop_send,
-            oneway_pos_read,
-            z_hotend_location,
+            executor_ctrl,
             pi_ctrl,
+            estop_send,
         }
     }
 
     pub fn state_info(&self) -> StateInfo {
-        self.state.read().unwrap().info()
+        let state = self.state.read().unwrap();
+        StateInfo::new(state.info(), self.executor_ctrl.current_line())
     }
 
-    pos_info_axis!(pos_info_x, x);
-    pos_info_axis!(pos_info_y, y);
-
-    pub fn pos_info_z(&self) -> f64 {
-        self.oneway_pos_read.z.read() - self.z_hotend_location.read()
-    }
+    pos_info_axis!(pos_info_x, pos_x);
+    pos_info_axis!(pos_info_y, pos_y);
+    pos_info_axis!(pos_info_z, pos_z);
 
     pub fn pos_info(&self) -> PositionInfo {
         PositionInfo {
@@ -112,45 +113,15 @@ impl HwCtrl {
     ) -> Result<(), TryReferenceError> {
         let state = self.state.read().unwrap();
         ensure_own!(state.is_stopped(), StateError::NotStopped);
-        let cfg = self.settings.config().motors.axis(&axis);
-        if let Some(speed) = parameters.speed.as_ref() {
-            ensure_own!(
-                *speed <= cfg.speed_limit,
-                TryReferenceError::OutOfBoundsError("speed", *speed, cfg.speed_limit)
-            );
-        }
-        if let Some(accel_decel) = parameters.accel_decel.as_ref() {
-            ensure_own!(
-                *accel_decel <= cfg.accel_limit,
-                TryReferenceError::OutOfBoundsError("accel_decel", *accel_decel, cfg.accel_limit)
-            );
-            ensure_own!(
-                *accel_decel <= cfg.decel_limit,
-                TryReferenceError::OutOfBoundsError("accel_decel", *accel_decel, cfg.decel_limit)
-            );
-        }
-        if let Some(jerk) = parameters.jerk.as_ref() {
-            ensure_own!(
-                *jerk <= cfg.accel_jerk_limit,
-                TryReferenceError::OutOfBoundsError("accel_decel", *jerk, cfg.accel_jerk_limit)
-            );
-            ensure_own!(
-                *jerk <= cfg.decel_limit,
-                TryReferenceError::OutOfBoundsError("accel_decel", *jerk, cfg.decel_jerk_limit)
-            );
-        }
-        self.executor_manual_send
-            .send(Action::ReferenceAxis(axis, parameters))
-            .unwrap();
-        Ok(())
+        self.executor_ctrl
+            .reference_axis(axis, parameters)
+            .map_err(Into::into)
     }
 
     pub fn try_reference_z_hotend(&self) -> Result<(), StateError> {
         let state = self.state.read().unwrap();
         ensure_own!(state.is_stopped(), StateError::NotStopped);
-        self.executor_manual_send
-            .send(Action::ReferenceZHotend)
-            .unwrap();
+        self.executor_ctrl.reference_z_hotend();
         Ok(())
     }
 
@@ -160,32 +131,22 @@ impl HwCtrl {
     pub fn try_print(&self, path: PathBuf) -> Result<()> {
         let mut state = self.state.write().unwrap();
         ensure!(state.is_stopped(), StateError::NotStopped);
-        let (executor_gcode_send, executor_gcode_recv) = channel::bounded(16);
-        self.decoder_ctrl.print(path.clone(), executor_gcode_send)?;
+        self.executor_ctrl.print(path.clone())?;
         let cur_line = state.print(path);
-        self.executor_ctrl_send
-            .send(ControlComms::Msg(ExecutorCtrl::GCode(
-                executor_gcode_recv,
-                Arc::clone(cur_line),
-            )))
-            .unwrap();
         Ok(())
     }
 
     pub fn stop(&self) {
         let mut state = self.state.write().unwrap();
         state.stop();
-        self.decoder_ctrl.stop();
-        self.executor_ctrl_send
-            .send(ControlComms::Msg(ExecutorCtrl::Manual))
-            .unwrap();
+        self.executor_ctrl.stop();
     }
 
     pub fn try_play(&self) -> Result<(), StateError> {
         let mut state = self.state.write().unwrap();
         ensure_own!(!state.is_stopped(), StateError::Stopped);
         state.play();
-        self.decoder_ctrl.play();
+        self.executor_ctrl.play();
         Ok(())
     }
 
@@ -196,7 +157,7 @@ impl HwCtrl {
         let mut state = self.state.write().unwrap();
         ensure_own!(!state.is_stopped(), StateError::Stopped);
         state.pause();
-        self.decoder_ctrl.pause();
+        self.executor_ctrl.pause();
         Ok(())
     }
 
@@ -207,8 +168,7 @@ impl HwCtrl {
     }
 
     pub fn exit(self) {
-        self.decoder_ctrl.exit();
-        self.executor_ctrl_send.send(ControlComms::Exit).unwrap();
+        drop(self.executor_ctrl);
         self.estop_send.send(ControlComms::Exit).unwrap();
         self.pi_ctrl.exit();
     }

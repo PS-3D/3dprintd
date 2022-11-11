@@ -1,9 +1,12 @@
 pub mod error;
 
 use self::error::{MotorError, MotorsError};
-use super::super::comms::{AxisMovement, ExtruderMovement, Movement};
+use super::{
+    super::decode::{AxisMovement, ExtruderMovement, Movement},
+    SharedRawPos,
+};
 use crate::{
-    comms::{OnewayAtomicF64Read, OnewayAtomicF64Write, ReferenceRunOptParameters},
+    comms::ReferenceRunOptParameters,
     config::{AxisMotor as AxisMotorConfig, Config, ExtruderMotor as ExtruderMotorConfig},
     settings::Settings,
 };
@@ -15,12 +18,18 @@ use nanotec_stepper_driver::{
     LimitSwitchBehaviorNormal, LimitSwitchBehaviorReference, Motor, MotorStatus, PositioningMode,
     RampType, Repetitions, RespondMode, ResponseHandle, SendAutoStatus,
 };
-use std::time::Duration;
+use std::{
+    sync::{
+        atomic::{AtomicI32, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 #[cfg(not(feature = "dev_no_motors"))]
 struct AxisMotorWrap {
     motor: Motor<SendAutoStatus>,
-    pos_mm: OnewayAtomicF64Write,
+    pos_steps: Arc<AtomicI32>,
 }
 
 // TODO maybe store state for all motors as in valid or invalid
@@ -58,7 +67,7 @@ macro_rules! make_reference_motor {
                     .jerk
                     .unwrap_or(settings.motors().$axis().get_reference_jerk()),
             )?;
-            self.$axis.pos_mm.write(0.0);
+            self.$axis.pos_steps.store(0, Ordering::Release);
             Ok(())
         }
     };
@@ -66,7 +75,7 @@ macro_rules! make_reference_motor {
 
 #[cfg(not(feature = "dev_no_motors"))]
 impl Motors {
-    pub fn new(settings: Settings) -> Result<(Self, EStop)> {
+    pub(super) fn new(settings: Settings, shared_pos: SharedRawPos) -> Result<(Self, EStop)> {
         let cfg = settings.config();
         let iface = serialport::new(cfg.motors.port.as_str(), cfg.motors.baud_rate)
             .timeout(Duration::from_secs(cfg.motors.timeout))
@@ -96,15 +105,15 @@ impl Motors {
             all,
             x: AxisMotorWrap {
                 motor: x,
-                pos_mm: OnewayAtomicF64Write::new(0.0),
+                pos_steps: shared_pos.x,
             },
             y: AxisMotorWrap {
                 motor: y,
-                pos_mm: OnewayAtomicF64Write::new(0.0),
+                pos_steps: shared_pos.y,
             },
             z: AxisMotorWrap {
                 motor: z,
-                pos_mm: OnewayAtomicF64Write::new(0.0),
+                pos_steps: shared_pos.z,
             },
             e,
         };
@@ -215,22 +224,6 @@ impl Motors {
         Ok(())
     }
 
-    pub fn z_pos_mm(&self) -> f64 {
-        self.z.pos_mm.read()
-    }
-
-    pub fn x_pos_mm_read(&self) -> OnewayAtomicF64Read {
-        self.x.pos_mm.get_read()
-    }
-
-    pub fn y_pos_mm_read(&self) -> OnewayAtomicF64Read {
-        self.y.pos_mm.get_read()
-    }
-
-    pub fn z_pos_mm_read(&self) -> OnewayAtomicF64Read {
-        self.z.pos_mm.get_read()
-    }
-
     fn reference_motor(
         motor: &mut Motor<SendAutoStatus>,
         speed: u32,
@@ -266,14 +259,12 @@ impl Motors {
     make_reference_motor!(reference_y, y);
     make_reference_motor!(reference_z, z);
 
-    fn update_mm_xzy(&self, m: &Movement, config: &Config) {
+    fn update_xzy(&self, m: &Movement) {
         macro_rules! update_axis {
             ($axis:ident) => {{
-                self.$axis.pos_mm.write(
-                    (config.motors.$axis.translation
-                        / (config.motors.$axis.step_size as u32 as f64))
-                        * (m.$axis.distance as f64),
-                )
+                self.$axis
+                    .pos_steps
+                    .store(m.$axis.distance, Ordering::Release)
             }};
         }
         update_axis!(x);
@@ -389,7 +380,7 @@ impl Motors {
             .filter(|t| t.1.is_err())
             .collect();
         if errs.is_empty() {
-            self.update_mm_xzy(m, config);
+            self.update_xzy(m);
             Ok(())
         } else {
             // invariant of MotorsError will be fulfilled because errs isn't empty
@@ -429,42 +420,17 @@ impl EStop {
 
 #[cfg(feature = "dev_no_motors")]
 pub struct Motors {
-    x_pos_mm: OnewayAtomicF64Write,
-    y_pos_mm: OnewayAtomicF64Write,
-    z_pos_mm: OnewayAtomicF64Write,
+    shared_pos: SharedRawPos,
 }
 
 #[cfg(feature = "dev_no_motors")]
 impl Motors {
-    pub fn new(settings: Settings) -> Result<(Self, EStop)> {
-        Ok((
-            Self {
-                x_pos_mm: OnewayAtomicF64Write::new(0.0),
-                y_pos_mm: OnewayAtomicF64Write::new(0.0),
-                z_pos_mm: OnewayAtomicF64Write::new(0.0),
-            },
-            EStop {},
-        ))
+    pub(super) fn new(settings: Settings, shared_pos: SharedRawPos) -> Result<(Self, EStop)> {
+        Ok((Self { shared_pos }, EStop {}))
     }
 
     pub fn init(&mut self) -> Result<()> {
         Ok(())
-    }
-
-    pub fn z_pos_mm(&self) -> f64 {
-        self.z_pos_mm.read()
-    }
-
-    pub fn x_pos_mm_read(&self) -> OnewayAtomicF64Read {
-        self.x_pos_mm.get_read()
-    }
-
-    pub fn y_pos_mm_read(&self) -> OnewayAtomicF64Read {
-        self.y_pos_mm.get_read()
-    }
-
-    pub fn z_pos_mm_read(&self) -> OnewayAtomicF64Read {
-        self.z_pos_mm.get_read()
     }
 
     pub fn reference_x(

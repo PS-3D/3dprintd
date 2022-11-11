@@ -1,0 +1,149 @@
+use super::{ExecutorCtrlComms, ExecutorManualComms, SharedRawPos};
+use crate::{
+    comms::{Axis, ControlComms, ReferenceRunOptParameters},
+    settings::Settings,
+    util::ensure_own,
+};
+use anyhow::{Context, Result};
+use crossbeam::channel::Sender;
+use std::{
+    fs::File,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+#[error("{} was out of bounds, was {}, must be <= {}", .0, .1, .2)]
+pub struct OutOfBoundsError(&'static str, u32, u32);
+
+#[derive(Debug, Clone)]
+pub struct ExecutorCtrl {
+    settings: Settings,
+    executor_ctrl_send: Sender<ControlComms<ExecutorCtrlComms>>,
+    executor_manual_send: Sender<ExecutorManualComms>,
+    line: Arc<AtomicUsize>,
+    shared_pos: SharedRawPos,
+}
+
+impl ExecutorCtrl {
+    pub(super) fn new(
+        settings: Settings,
+        executor_ctrl_send: Sender<ControlComms<ExecutorCtrlComms>>,
+        executor_manual_send: Sender<ExecutorManualComms>,
+        shared_pos: SharedRawPos,
+    ) -> Self {
+        Self {
+            settings,
+            executor_ctrl_send,
+            executor_manual_send,
+            line: Arc::new(AtomicUsize::new(0)),
+            shared_pos,
+        }
+    }
+
+    fn send_executor_ctrl(&self, msg: ExecutorCtrlComms) {
+        self.executor_ctrl_send
+            .send(ControlComms::Msg(msg))
+            .unwrap();
+    }
+
+    pub fn print(&self, path: PathBuf) -> Result<()> {
+        let file = File::open(&path).context("failed to open gcode file")?;
+        self.send_executor_ctrl(ExecutorCtrlComms::Print(file, path, Arc::clone(&self.line)));
+        Ok(())
+    }
+
+    pub fn stop(&self) {
+        self.send_executor_ctrl(ExecutorCtrlComms::Stop)
+    }
+
+    pub fn play(&self) {
+        self.send_executor_ctrl(ExecutorCtrlComms::Play)
+    }
+
+    pub fn pause(&self) {
+        self.send_executor_ctrl(ExecutorCtrlComms::Pause)
+    }
+
+    pub fn current_line(&self) -> usize {
+        self.line.load(Ordering::Acquire)
+    }
+
+    pub fn pos_x(&self) -> f64 {
+        self.settings
+            .config()
+            .motors
+            .x
+            .steps_to_mm(self.shared_pos.x.load(Ordering::Acquire))
+    }
+
+    pub fn pos_y(&self) -> f64 {
+        self.settings
+            .config()
+            .motors
+            .y
+            .steps_to_mm(self.shared_pos.y.load(Ordering::Acquire))
+    }
+
+    pub fn pos_z(&self) -> f64 {
+        self.settings
+            .config()
+            .motors
+            .z
+            .steps_to_mm(self.shared_pos.z.load(Ordering::Acquire))
+    }
+
+    pub fn reference_axis(
+        &self,
+        axis: Axis,
+        parameters: ReferenceRunOptParameters,
+    ) -> Result<(), OutOfBoundsError> {
+        let cfg = self.settings.config().motors.axis(&axis);
+        if let Some(speed) = parameters.speed.as_ref() {
+            ensure_own!(
+                *speed <= cfg.speed_limit,
+                OutOfBoundsError("speed", *speed, cfg.speed_limit)
+            );
+        }
+        if let Some(accel_decel) = parameters.accel_decel.as_ref() {
+            ensure_own!(
+                *accel_decel <= cfg.accel_limit,
+                OutOfBoundsError("accel_decel", *accel_decel, cfg.accel_limit)
+            );
+            ensure_own!(
+                *accel_decel <= cfg.decel_limit,
+                OutOfBoundsError("accel_decel", *accel_decel, cfg.decel_limit)
+            );
+        }
+        if let Some(jerk) = parameters.jerk.as_ref() {
+            ensure_own!(
+                *jerk <= cfg.accel_jerk_limit,
+                OutOfBoundsError("accel_decel", *jerk, cfg.accel_jerk_limit)
+            );
+            ensure_own!(
+                *jerk <= cfg.decel_limit,
+                OutOfBoundsError("accel_decel", *jerk, cfg.decel_jerk_limit)
+            );
+        }
+        self.executor_manual_send
+            .send(ExecutorManualComms::ReferenceAxis(axis, parameters))
+            .unwrap();
+        Ok(())
+    }
+
+    pub fn reference_z_hotend(&self) {
+        self.executor_manual_send
+            .send(ExecutorManualComms::ReferenceZAxisHotend)
+            .unwrap()
+    }
+}
+
+impl Drop for ExecutorCtrl {
+    fn drop(&mut self) {
+        self.executor_ctrl_send.send(ControlComms::Exit).unwrap()
+    }
+}

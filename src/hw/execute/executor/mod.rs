@@ -1,6 +1,6 @@
-use super::{super::comms::Action, motors::Motors};
+use super::{super::decode::Action, motors::Motors};
 use crate::{
-    comms::{Axis, OnewayAtomicF64Read, OnewayAtomicF64Write},
+    comms::{Axis, ReferenceRunOptParameters},
     hw::pi::PiCtrl,
     log::target,
     settings::Settings,
@@ -13,32 +13,19 @@ pub struct Executor {
     settings: Settings,
     motors: Motors,
     pi_ctrl: PiCtrl,
-    z_hotend_location: OnewayAtomicF64Write,
 }
 
 impl Executor {
-    pub fn new(settings: Settings, motors: Motors, pi_ctrl: PiCtrl) -> (Self, OnewayAtomicF64Read) {
-        let z_hotend_location_write =
-            OnewayAtomicF64Write::new(-(settings.config().motors.z.limit as f64));
-        let z_hotend_location_read = z_hotend_location_write.get_read();
-        (
-            Self {
-                settings,
-                motors,
-                pi_ctrl,
-                z_hotend_location: z_hotend_location_write,
-            },
-            z_hotend_location_read,
-        )
+    pub fn new(settings: Settings, motors: Motors, pi_ctrl: PiCtrl) -> Self {
+        Self {
+            settings,
+            motors,
+            pi_ctrl,
+        }
     }
 
     fn exec_wait(&self, time: Duration) {
         thread::sleep(time);
-    }
-
-    fn exec_reference_z_hotend(&self) -> Result<()> {
-        self.z_hotend_location.write(self.motors.z_pos_mm());
-        Ok(())
     }
 
     fn exec_hotend_target(&self, target: Option<u16>) -> Result<()> {
@@ -72,16 +59,23 @@ impl Executor {
         Ok(())
     }
 
+    pub fn exec_reference_axis(
+        &mut self,
+        axis: Axis,
+        parameters: ReferenceRunOptParameters,
+    ) -> Result<()> {
+        match axis {
+            Axis::X => self.motors.reference_x(&self.settings, parameters),
+            Axis::Y => self.motors.reference_y(&self.settings, parameters),
+            Axis::Z => self.motors.reference_z(&self.settings, parameters),
+        }
+    }
+
     pub fn exec(&mut self, action: Action) -> Result<()> {
         debug!(target: target::INTERNAL, "Executing {:?}", action);
         match action {
             Action::MoveAll(m) => self.motors.move_all(&m, self.settings.config()),
-            Action::ReferenceAxis(a, params) => match a {
-                Axis::X => self.motors.reference_x(&self.settings, params),
-                Axis::Y => self.motors.reference_y(&self.settings, params),
-                Axis::Z => self.motors.reference_z(&self.settings, params),
-            },
-            Action::ReferenceZHotend => self.exec_reference_z_hotend(),
+            Action::ReferenceAxis(a, params) => self.exec_reference_axis(a, params),
             Action::HotendTarget(t) => self.exec_hotend_target(t),
             Action::BedTarget(t) => self.exec_bed_target(t),
             // FIXME add timeouts for temp waits, otherwise it might wait forever
