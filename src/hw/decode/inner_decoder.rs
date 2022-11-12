@@ -175,13 +175,6 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    pub fn new(settings: Settings, z_hotend_location: f64) -> Self {
-        Self {
-            settings,
-            state: State::new(z_hotend_location),
-        }
-    }
-
     pub fn with_state(settings: Settings, state: State) -> Self {
         Self { settings, state }
     }
@@ -482,24 +475,27 @@ impl Decoder {
     ///
     /// No arguments will assume all arguments present.
     ///
-    /// Won't actually home Z axis, only X and Y, since the Z axis endstop is at
-    /// the bottom and homing it might destroy the manual homing measurement.
+    /// Be aware that this homes the z axis, i.e. drives it to where it thinks
+    /// the hotend is. If that hasn't been set properly beforehand the printer
+    /// could be damaged.
     // FIXME maybe we could home the z axis by setting the power down to where
     //       it wouldn't hurt the print head and then slowly move the bed
     //       into the printhead and then zeroeing?
-    // FIXME drive given axis to origin
     fn g28(&mut self, code: GCode) -> GCodeResult<VecDeque<(Action, GCode)>> {
         assert_code!(code, General, 28, 0);
         let mut x = false;
         let mut y = false;
+        let mut z = false;
         if code.arguments().is_empty() {
             x = true;
             y = true;
+            z = true;
         } else {
             for arg in code.arguments().iter() {
                 let letter = match arg.letter {
                     'X' => &mut x,
                     'Y' => &mut y,
+                    'Z' => &mut z,
                     _ => bail_own!(GCodeError::UnknownArgument(*arg, code)),
                 };
                 *letter = true;
@@ -516,6 +512,32 @@ impl Decoder {
         if y {
             actions.push_back((
                 Action::ReferenceAxis(Axis::Y, ReferenceRunOptParameters::default()),
+                code.clone(),
+            ));
+        }
+        if z {
+            self.state.actual.steps_z = self
+                .settings
+                .config()
+                .motors
+                .z
+                .mm_to_steps(self.state.actual.z_hotend_location);
+            self.state.actual.z = self.state.actual.z_hotend_location;
+            self.state.gcode.z = 0.0;
+            let z_settings = self.settings.motors().z();
+            actions.push_back((
+                Action::MoveAxis(
+                    Axis::Z,
+                    AxisMovement {
+                        distance: self.state.actual.steps_z,
+                        min_frequency: 1,
+                        max_frequency: z_settings.get_reference_speed(),
+                        acceleration: z_settings.get_reference_accel_decel(),
+                        deceleration: z_settings.get_reference_accel_decel(),
+                        acceleration_jerk: z_settings.get_reference_jerk(),
+                        deceleration_jerk: z_settings.get_reference_jerk(),
+                    },
+                ),
                 code,
             ));
         }

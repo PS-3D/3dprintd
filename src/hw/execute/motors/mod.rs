@@ -457,13 +457,18 @@ impl EStop {
 
 #[cfg(feature = "dev_no_motors")]
 pub struct Motors {
-    shared_pos: SharedRawPos,
+    _shared_pos: SharedRawPos,
 }
 
 #[cfg(feature = "dev_no_motors")]
 impl Motors {
-    pub(super) fn new(settings: Settings, shared_pos: SharedRawPos) -> Result<(Self, EStop)> {
-        Ok((Self { shared_pos }, EStop {}))
+    pub(super) fn new(_settings: Settings, shared_pos: SharedRawPos) -> Result<(Self, EStop)> {
+        Ok((
+            Self {
+                _shared_pos: shared_pos,
+            },
+            EStop {},
+        ))
     }
 
     pub fn init(&mut self) -> Result<()> {
@@ -472,29 +477,41 @@ impl Motors {
 
     pub fn reference_x(
         &mut self,
-        settings: &Settings,
-        params: ReferenceRunOptParameters,
+        _settings: &Settings,
+        _params: ReferenceRunOptParameters,
     ) -> Result<()> {
         Ok(())
     }
 
     pub fn reference_y(
         &mut self,
-        settings: &Settings,
-        params: ReferenceRunOptParameters,
+        _settings: &Settings,
+        _params: ReferenceRunOptParameters,
     ) -> Result<()> {
         Ok(())
     }
 
     pub fn reference_z(
         &mut self,
-        settings: &Settings,
-        params: ReferenceRunOptParameters,
+        _settings: &Settings,
+        _params: ReferenceRunOptParameters,
     ) -> Result<()> {
         Ok(())
     }
 
-    pub fn move_all(&mut self, m: &Movement, config: &Config) -> Result<()> {
+    pub fn move_all(&mut self, _m: &Movement, _config: &Config) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn move_x(&mut self, _m: &AxisMovement) -> Result<(), MotorError> {
+        Ok(())
+    }
+
+    pub fn move_y(&mut self, _m: &AxisMovement) -> Result<(), MotorError> {
+        Ok(())
+    }
+
+    pub fn move_z(&mut self, _m: &AxisMovement) -> Result<(), MotorError> {
         Ok(())
     }
 }

@@ -320,6 +320,12 @@ impl AxisMotor {
         let rotations = (steps as f64) / ((360.0 / 1.8) * (self.step_size as u32 as f64));
         rotations * self.translation
     }
+
+    pub fn mm_to_steps(&self, mm: f64) -> i32 {
+        // 360 / 1.8 because every step is 1.8 degrees
+        let rotations = mm * (360.0 / 1.8) * (self.step_size as u32 as f64);
+        (rotations * self.translation) as i32
+    }
 }
 
 #[derive(Debug, Deserialize)]
