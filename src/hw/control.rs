@@ -44,7 +44,7 @@ impl StateInfo {
     pub(self) fn new(state: InnerStateInfo, line: usize) -> Self {
         match state {
             InnerStateInfo::Printing(path) => Self::Printing(PrintingStateInfo { path, line }),
-            InnerStateInfo::Paused(path) => Self::Printing(PrintingStateInfo { path, line }),
+            InnerStateInfo::Paused(path) => Self::Paused(PrintingStateInfo { path, line }),
             InnerStateInfo::Stopped => Self::Stopped,
         }
     }
