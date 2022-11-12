@@ -163,6 +163,8 @@ impl Drop for ExecutorCtrl {
         self.executor_ctrl_send.send(ControlComms::Exit).unwrap();
         // safety:
         // since we are in drop, self.executor_handle will not be used again
-        unsafe { ManuallyDrop::take(&mut self.executor_handle) }.join();
+        unsafe { ManuallyDrop::take(&mut self.executor_handle) }
+            .join()
+            .unwrap();
     }
 }
