@@ -75,6 +75,12 @@ impl Executor {
         debug!(target: target::INTERNAL, "Executing {:?}", action);
         match action {
             Action::MoveAll(m) => self.motors.move_all(&m, self.settings.config()),
+            Action::MoveAxis(a, m) => match a {
+                Axis::X => self.motors.move_x(&m),
+                Axis::Y => self.motors.move_y(&m),
+                Axis::Z => self.motors.move_z(&m),
+            }
+            .map_err(Into::into),
             Action::ReferenceAxis(a, params) => self.exec_reference_axis(a, params),
             Action::HotendTarget(t) => self.exec_hotend_target(t),
             Action::BedTarget(t) => self.exec_bed_target(t),

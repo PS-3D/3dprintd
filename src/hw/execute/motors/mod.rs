@@ -48,6 +48,37 @@ pub struct Motors {
     e: Motor<SendAutoStatus>,
 }
 
+fn prepare_move_axis(
+    motor: &mut Motor<SendAutoStatus>,
+    am: &AxisMovement,
+) -> Result<(), DriverError> {
+    motor.set_travel_distance(am.distance)?.wait().unwrap();
+    // if distance is set to 0, ignore setting the other values, it means
+    // the motor won't move anyways
+    if am.distance != 0 {
+        // don't set min frequency, since that is alwyas the same and we already
+        // set it
+        motor.set_max_frequency(am.max_frequency)?.wait().unwrap();
+        motor
+            .set_accel_ramp_no_conversion(am.acceleration)?
+            .wait()
+            .unwrap();
+        motor
+            .set_brake_ramp_no_conversion(am.deceleration)?
+            .wait()
+            .unwrap();
+        motor
+            .set_max_accel_jerk(am.acceleration_jerk)?
+            .wait()
+            .unwrap();
+        motor
+            .set_max_brake_jerk(am.deceleration_jerk)?
+            .wait()
+            .unwrap();
+    }
+    Ok(())
+}
+
 macro_rules! make_reference_motor {
     ($name:ident, $axis:ident) => {
         pub fn $name(
@@ -69,6 +100,38 @@ macro_rules! make_reference_motor {
             )?;
             self.$axis.pos_steps.store(0, Ordering::Release);
             Ok(())
+        }
+    };
+}
+
+macro_rules! make_move_motor {
+    ($name:ident, $axis:ident) => {
+        pub fn $name(&mut self, m: &AxisMovement) -> Result<(), MotorError> {
+            self.$axis
+                .motor
+                .set_respond_mode(RespondMode::Quiet)?
+                .wait()
+                .unwrap();
+            prepare_move_axis(&mut self.$axis.motor, m)?;
+            // set respondmode to notquiet so we will receive the status once
+            // the motor is finished
+            self.$axis
+                .motor
+                .set_respond_mode(RespondMode::NotQuiet)?
+                .wait()
+                .ignore()?;
+            let status = self
+                .$axis
+                .motor
+                .start_motor()?
+                .wait()
+                .ignore()?
+                .wait()
+                .ignore()?;
+            match status {
+                MotorStatus::PosError => Err(MotorError::PositionError),
+                _ => Ok(()),
+            }
         }
     };
 }
@@ -283,36 +346,6 @@ impl Motors {
             .wait()
             .unwrap();
 
-        fn prepare_move_axis(
-            motor: &mut Motor<SendAutoStatus>,
-            am: &AxisMovement,
-        ) -> Result<(), DriverError> {
-            motor.set_travel_distance(am.distance)?.wait().unwrap();
-            // if distance is set to 0, ignore setting the other values, it means
-            // the motor won't move anyways
-            if am.distance != 0 {
-                // don't set min frequency, since that is alwyas the same and we already
-                // set it
-                motor.set_max_frequency(am.max_frequency)?.wait().unwrap();
-                motor
-                    .set_accel_ramp_no_conversion(am.acceleration)?
-                    .wait()
-                    .unwrap();
-                motor
-                    .set_brake_ramp_no_conversion(am.deceleration)?
-                    .wait()
-                    .unwrap();
-                motor
-                    .set_max_accel_jerk(am.acceleration_jerk)?
-                    .wait()
-                    .unwrap();
-                motor
-                    .set_max_brake_jerk(am.deceleration_jerk)?
-                    .wait()
-                    .unwrap();
-            }
-            Ok(())
-        }
         fn prepare_move_extruder(
             motor: &mut Motor<SendAutoStatus>,
             em: &ExtruderMovement,
@@ -406,6 +439,10 @@ impl Motors {
             Err(me.into())
         }
     }
+
+    make_move_motor!(move_x, x);
+    make_move_motor!(move_y, y);
+    make_move_motor!(move_z, z);
 }
 
 #[cfg(feature = "dev_no_motors")]

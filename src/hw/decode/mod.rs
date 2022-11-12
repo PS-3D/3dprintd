@@ -55,6 +55,7 @@ pub struct Movement {
 #[derive(Debug)]
 pub enum Action {
     MoveAll(Movement),
+    MoveAxis(Axis, AxisMovement),
     // only allows referencing the z axis into the endstop direction
     // referencing it into the hotend direction can only be done manually
     ReferenceAxis(Axis, ReferenceRunOptParameters),
