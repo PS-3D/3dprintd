@@ -9,11 +9,13 @@ use atomic_float::AtomicF64;
 use crossbeam::channel::Sender;
 use std::{
     fs::File,
+    mem::ManuallyDrop,
     path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    thread::JoinHandle,
 };
 use thiserror::Error;
 
@@ -21,9 +23,13 @@ use thiserror::Error;
 #[error("{} was out of bounds, was {}, must be <= {}", .0, .1, .2)]
 pub struct OutOfBoundsError(&'static str, u32, u32);
 
-#[derive(Debug, Clone)]
+// not implementing clone since that could lead to the executor thread being
+// stopped twice due to implementing drop. though this makes intuitive sense
+// anyways, one executor thread, one control for it
+#[derive(Debug)]
 pub struct ExecutorCtrl {
     settings: Settings,
+    executor_handle: ManuallyDrop<JoinHandle<()>>,
     executor_ctrl_send: Sender<ControlComms<ExecutorCtrlComms>>,
     executor_manual_send: Sender<ExecutorManualComms>,
     line: Arc<AtomicUsize>,
@@ -36,6 +42,7 @@ pub struct ExecutorCtrl {
 impl ExecutorCtrl {
     pub(super) fn new(
         settings: Settings,
+        executor_handle: JoinHandle<()>,
         executor_ctrl_send: Sender<ControlComms<ExecutorCtrlComms>>,
         executor_manual_send: Sender<ExecutorManualComms>,
         shared_pos: SharedRawPos,
@@ -43,6 +50,7 @@ impl ExecutorCtrl {
     ) -> Self {
         Self {
             settings,
+            executor_handle: ManuallyDrop::new(executor_handle),
             executor_ctrl_send,
             executor_manual_send,
             line: Arc::new(AtomicUsize::new(0)),
@@ -148,8 +156,13 @@ impl ExecutorCtrl {
             .send(ExecutorManualComms::ReferenceZAxisHotend)
             .unwrap()
     }
+}
 
-    pub fn exit(self) {
-        self.executor_ctrl_send.send(ControlComms::Exit).unwrap()
+impl Drop for ExecutorCtrl {
+    fn drop(&mut self) {
+        self.executor_ctrl_send.send(ControlComms::Exit).unwrap();
+        // safety:
+        // since we are in drop, self.executor_handle will not be used again
+        unsafe { ManuallyDrop::take(&mut self.executor_handle) }.join();
     }
 }

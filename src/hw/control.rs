@@ -60,7 +60,7 @@ pub struct PositionInfo {
 pub struct HwCtrl {
     state: Arc<RwLock<State>>,
     settings: Settings,
-    executor_ctrl: ExecutorCtrl,
+    executor_ctrl: Arc<ExecutorCtrl>,
     pi_ctrl: PiCtrl,
     estop_send: Sender<ControlComms<EStopComms>>,
 }
@@ -83,7 +83,7 @@ impl HwCtrl {
         Self {
             state: Arc::new(RwLock::new(State::new())),
             settings,
-            executor_ctrl,
+            executor_ctrl: Arc::new(executor_ctrl),
             pi_ctrl,
             estop_send,
         }
@@ -168,7 +168,6 @@ impl HwCtrl {
     }
 
     pub fn exit(self) {
-        self.executor_ctrl.exit();
         self.estop_send.send(ControlComms::Exit).unwrap();
         self.pi_ctrl.exit();
     }

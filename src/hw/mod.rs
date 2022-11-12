@@ -18,15 +18,15 @@ use std::thread::JoinHandle;
 pub fn start(
     settings: Settings,
     error_send: Sender<ControlComms<Error>>,
-) -> Result<(JoinHandle<()>, JoinHandle<()>, JoinHandle<()>, HwCtrl)> {
+) -> Result<(JoinHandle<()>, JoinHandle<()>, HwCtrl)> {
     let (estop_send, estop_recv) = channel::unbounded();
     let (pi_handle, pi_ctrl) = pi::start(settings.clone(), error_send.clone())?;
-    let (executor_handle, estop_handle, executor_ctrl) = execute::start(
+    let (estop_handle, executor_ctrl) = execute::start(
         settings.clone(),
         pi_ctrl.clone(),
         estop_recv,
         error_send.clone(),
     )?;
     let hw_ctrl = HwCtrl::new(settings, executor_ctrl, pi_ctrl, estop_send);
-    Ok((pi_handle, executor_handle, estop_handle, hw_ctrl))
+    Ok((pi_handle, estop_handle, hw_ctrl))
 }

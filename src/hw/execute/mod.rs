@@ -246,7 +246,7 @@ pub fn start(
     pi_ctrl: PiCtrl,
     estop_recv: Receiver<ControlComms<EStopComms>>,
     error_send: Sender<ControlComms<Error>>,
-) -> Result<(JoinHandle<()>, JoinHandle<()>, ExecutorCtrl)> {
+) -> Result<(JoinHandle<()>, ExecutorCtrl)> {
     let (executor_ctrl_send, executor_ctrl_recv) = channel::unbounded();
     let (executor_manual_send, executor_manual_recv) = channel::unbounded();
     let (setup_send, setup_recv) = channel::bounded(1);
@@ -318,10 +318,10 @@ pub fn start(
         .context("Creating the executor thread failed")?;
     let estop_handle = setup_recv.recv().unwrap()?;
     Ok((
-        executor_handle,
         estop_handle,
         ExecutorCtrl::new(
             settings_clone,
+            executor_handle,
             executor_ctrl_send,
             executor_manual_send,
             shared_pos,
