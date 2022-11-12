@@ -168,6 +168,7 @@ impl HwCtrl {
     }
 
     pub fn exit(self) {
+        drop(self.executor_ctrl);
         self.estop_send.send(ControlComms::Exit).unwrap();
         self.pi_ctrl.exit();
     }
