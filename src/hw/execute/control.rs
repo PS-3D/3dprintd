@@ -148,10 +148,8 @@ impl ExecutorCtrl {
             .send(ExecutorManualComms::ReferenceZAxisHotend)
             .unwrap()
     }
-}
 
-impl Drop for ExecutorCtrl {
-    fn drop(&mut self) {
+    pub fn exit(self) {
         self.executor_ctrl_send.send(ControlComms::Exit).unwrap()
     }
 }
