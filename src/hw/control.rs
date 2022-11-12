@@ -61,7 +61,7 @@ pub struct HwCtrl {
     state: Arc<RwLock<State>>,
     settings: Settings,
     executor_ctrl: Arc<ExecutorCtrl>,
-    pi_ctrl: PiCtrl,
+    pi_ctrl: Arc<PiCtrl>,
     estop_send: Sender<ControlComms<EStopComms>>,
 }
 
@@ -77,7 +77,7 @@ impl HwCtrl {
     pub(super) fn new(
         settings: Settings,
         executor_ctrl: ExecutorCtrl,
-        pi_ctrl: PiCtrl,
+        pi_ctrl: Arc<PiCtrl>,
         estop_send: Sender<ControlComms<EStopComms>>,
     ) -> Self {
         Self {
@@ -169,7 +169,7 @@ impl HwCtrl {
 
     pub fn exit(self) {
         drop(self.executor_ctrl);
+        drop(self.pi_ctrl);
         self.estop_send.send(ControlComms::Exit).unwrap();
-        self.pi_ctrl.exit();
     }
 }

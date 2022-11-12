@@ -13,7 +13,7 @@ use anyhow::{Context, Error, Result};
 use crossbeam::channel::{self, Receiver, Sender, TryRecvError};
 use std::{
     collections::BTreeMap,
-    mem,
+    mem::{self, ManuallyDrop},
     sync::{
         atomic::{AtomicU16, Ordering},
         Arc,
@@ -73,13 +73,18 @@ impl AtomicTargetTemp {
     }
 }
 
+// not implementing clone since that could lead to the pi thread being
+// stopped twice due to implementing drop. though this makes intuitive sense
+// anyways, one pithread, one control for it
+//
 // hotend_target and bed_target should only be used for reading, setting it is
 // done via pi_send. This is done so the pi thread can notify any threads waiting
 // for a certain target temp to be reached that the target changed and cannot be
 // reached if that is the case.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PiCtrl {
     settings: Settings,
+    pi_handle: ManuallyDrop<JoinHandle<()>>,
     pi_send: Sender<PiComms>,
     hotend_target: AtomicTargetTemp,
     bed_target: AtomicTargetTemp,
@@ -88,12 +93,14 @@ pub struct PiCtrl {
 impl PiCtrl {
     fn new(
         settings: Settings,
+        pi_handle: JoinHandle<()>,
         pi_send: Sender<PiComms>,
         hotend_target: AtomicTargetTemp,
         bed_target: AtomicTargetTemp,
     ) -> Self {
         Self {
             settings,
+            pi_handle: ManuallyDrop::new(pi_handle),
             pi_send,
             hotend_target,
             bed_target,
@@ -173,9 +180,16 @@ impl PiCtrl {
             .unwrap();
         Ok(notify_recv.recv().unwrap())
     }
+}
 
-    pub fn exit(self) {
-        self.pi_send.send(ControlComms::Exit).unwrap()
+impl Drop for PiCtrl {
+    fn drop(&mut self) {
+        self.pi_send.send(ControlComms::Exit).unwrap();
+        // safety:
+        // since we are in drop, self.pi_handle will not be used again
+        unsafe { ManuallyDrop::take(&mut self.pi_handle) }
+            .join()
+            .unwrap();
     }
 }
 
@@ -202,13 +216,8 @@ impl PiThreadData {
         })
     }
 
-    pub fn get_ctrl(&self, settings: Settings, pi_send: Sender<PiComms>) -> PiCtrl {
-        PiCtrl::new(
-            settings,
-            pi_send,
-            self.hotend_target.clone(),
-            self.bed_target.clone(),
-        )
+    pub fn get_targets(&self) -> (AtomicTargetTemp, AtomicTargetTemp) {
+        (self.hotend_target.clone(), self.bed_target.clone())
     }
 
     pub fn update_hotend_heat(&self) -> Result<()> {
@@ -333,16 +342,20 @@ fn pi_loop(
     }
 }
 
-pub fn start(
-    settings: Settings,
-    error_send: Sender<ControlComms<Error>>,
-) -> Result<(JoinHandle<()>, PiCtrl)> {
+pub fn start(settings: Settings, error_send: Sender<ControlComms<Error>>) -> Result<PiCtrl> {
     let (pi_send, pi_recv) = channel::unbounded();
     let pi_thread_data = PiThreadData::new()?;
-    let pi_ctrl = pi_thread_data.get_ctrl(settings.clone(), pi_send);
+    let (hotend_target, bed_target) = pi_thread_data.get_targets();
+    let settings_clone = settings.clone();
     let handle = thread::Builder::new()
         .name(String::from("pi"))
-        .spawn(move || pi_loop(settings, pi_thread_data, pi_recv, error_send))
+        .spawn(move || pi_loop(settings_clone, pi_thread_data, pi_recv, error_send))
         .context("Creating the pi thread failed")?;
-    Ok((handle, pi_ctrl))
+    Ok(PiCtrl::new(
+        settings,
+        handle,
+        pi_send,
+        hotend_target,
+        bed_target,
+    ))
 }

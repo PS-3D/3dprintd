@@ -65,7 +65,7 @@ fn main() -> Result<()> {
     let settings = settings::settings(config)?;
     let (error_send, error_recv) = channel::unbounded();
     let (error_handle, errors) = api::values::start(error_recv)?;
-    let (pi_handle, estop_handle, hw_ctrl) = hw::start(settings.clone(), error_send.clone())?;
+    let (estop_handle, hw_ctrl) = hw::start(settings.clone(), error_send.clone())?;
     api::launch(settings.clone(), errors, hw_ctrl.clone())?;
     debug!(
         target: target::INTERNAL,
@@ -73,7 +73,6 @@ fn main() -> Result<()> {
     );
     hw_ctrl.exit();
     estop_handle.join().unwrap();
-    pi_handle.join().unwrap();
     error_send.send(ControlComms::Exit).unwrap();
     error_handle.join().unwrap();
     Ok(())

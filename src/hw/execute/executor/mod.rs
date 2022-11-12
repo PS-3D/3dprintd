@@ -6,17 +6,17 @@ use crate::{
     settings::Settings,
 };
 use anyhow::Result;
-use std::{thread, time::Duration};
+use std::{sync::Arc, thread, time::Duration};
 use tracing::debug;
 
 pub struct Executor {
     settings: Settings,
     motors: Motors,
-    pi_ctrl: PiCtrl,
+    pi_ctrl: Arc<PiCtrl>,
 }
 
 impl Executor {
-    pub fn new(settings: Settings, motors: Motors, pi_ctrl: PiCtrl) -> Self {
+    pub fn new(settings: Settings, motors: Motors, pi_ctrl: Arc<PiCtrl>) -> Self {
         Self {
             settings,
             motors,

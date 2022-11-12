@@ -243,7 +243,7 @@ fn executor_loop(
 
 pub fn start(
     settings: Settings,
-    pi_ctrl: PiCtrl,
+    pi_ctrl: Arc<PiCtrl>,
     estop_recv: Receiver<ControlComms<EStopComms>>,
     error_send: Sender<ControlComms<Error>>,
 ) -> Result<(JoinHandle<()>, ExecutorCtrl)> {
