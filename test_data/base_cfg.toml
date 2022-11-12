@@ -1,0 +1,50 @@
+[general]
+settings_path = "/home/mfischer/Desktop/projects/ps3d/ps3dprintd/settings.json"
+
+[log]
+level = "trace"
+
+[motors]
+
+port = "/dev/ttyUSB0"
+timeout = 1
+
+[motors.x]
+address = 1
+translation = 10.476191
+step_size = 64
+limit = 400
+endstop_direction = "right"
+quickstop_ramp = 0
+
+[motors.y]
+address = 2
+translation = 10.476191
+step_size = 64
+limit = 400
+endstop_direction = "right"
+quickstop_ramp = 0
+
+[motors.z]
+address = 3
+translation = 1.704546
+step_size = 64
+limit = 400
+endstop_direction = "left"
+quickstop_ramp = 0
+
+[motors.e]
+address = 4
+translation = 7.644542
+step_size = 64
+# not final!
+positive_direction = "left"
+quickstop_ramp = 0
+
+[hotend]
+upper_limit = 300
+lower_limit = 40
+
+[bed]
+upper_limit = 80
+lower_limit = 40
