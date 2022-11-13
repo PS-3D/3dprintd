@@ -96,7 +96,10 @@ class Server():
     def _stop(self):
         if self._proc != None:
             self._proc.terminate()
-            self._proc.wait()
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
             assert self._proc.returncode == 0
 
 
