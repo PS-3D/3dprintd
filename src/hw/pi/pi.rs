@@ -1,3 +1,8 @@
+// makes everything a bit more clear instead of annotating the imports etc.
+// isn't really that big of a deal since this flag should only be used
+// in development anyways
+#![cfg_attr(feature = "dev_no_pi", allow(unused_imports))]
+
 use anyhow::{Context, Result};
 use revpi::revpi_from_json;
 
@@ -62,13 +67,13 @@ impl RevPi {
         Ok(Self {})
     }
 
-    pub fn write_hotend_heat(&self, state: bool) -> Result<()> {
+    pub fn write_hotend_heat(&self, _state: bool) -> Result<()> {
         Ok(())
     }
 
-    pub fn write_hotend_fan(&self, state: bool) {}
+    pub fn write_hotend_fan(&self, _state: bool) {}
 
-    pub fn write_bed_heat(&self, state: bool) -> Result<()> {
+    pub fn write_bed_heat(&self, _state: bool) -> Result<()> {
         Ok(())
     }
 
