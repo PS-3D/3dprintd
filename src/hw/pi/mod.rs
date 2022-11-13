@@ -220,13 +220,34 @@ impl PiThreadData {
         (self.hotend_target.clone(), self.bed_target.clone())
     }
 
-    pub fn update_hotend_heat(&self) -> Result<()> {
+    #[cfg(not(feature = "dev_no_pi"))]
+    pub fn update_hotend_heat(&mut self) -> Result<()> {
         // FIXME TODO
         Ok(())
     }
 
-    pub fn update_bed_heat(&self) -> Result<()> {
+    #[cfg(feature = "dev_no_pi")]
+    pub fn update_hotend_heat(&mut self) -> Result<()> {
+        for notify_send in self.hotend_waiting.drain(..) {
+            notify_send.send(Ok(())).unwrap();
+        }
+        Ok(())
+    }
+
+    #[cfg(not(feature = "dev_no_pi"))]
+    pub fn update_bed_heat(&mut self) -> Result<()> {
         // FIXME TODO
+        Ok(())
+    }
+
+    #[cfg(feature = "dev_no_pi")]
+    pub fn update_bed_heat(&mut self) -> Result<()> {
+        for notify_send in self.bed_waiting.drain(..) {
+            notify_send.send(Ok(())).unwrap();
+        }
+        for notify_send in mem::replace(&mut self.bed_min_waiting, BTreeMap::new()).into_values() {
+            notify_send.send(Ok(())).unwrap();
+        }
         Ok(())
     }
 
