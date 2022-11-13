@@ -128,7 +128,21 @@ impl State {
         }
     }
 
-    pub fn decoder_mut(&mut self) -> Option<&mut PrintingData> {
+    pub fn is_stopped(&self) -> bool {
+        match self.inner {
+            InnerState::Stopped(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_printing(&self) -> bool {
+        match self.inner {
+            InnerState::Printing => true,
+            _ => false,
+        }
+    }
+
+    pub fn printing_data_mut(&mut self) -> Option<&mut PrintingData> {
         self.data.as_mut()
     }
 
@@ -200,26 +214,36 @@ fn executor_loop(
                 }
             },
         }
-        if let Some(printing_data) = state.decoder_mut() {
-            if let Some(res) = printing_data.decoder.next() {
-                let (action, code) = match res {
-                    Ok(t) => t,
-                    Err(e) => {
-                        // FIXME alert hwctrl of error
-                        error_send.send(ControlComms::Msg(e.into())).unwrap();
-                        state.stop();
-                        continue;
-                    }
-                };
-                // FIXME maybe use Ordering::Relaxed since it doesn't really matter?
-                printing_data
-                    .line
-                    .store(code.span().line(), Ordering::Release);
-                debug!(target: target::PUBLIC, "Executing {}", code);
-                send_err!(exec.exec(action), error_send)
+        // if we're not stopped we're either printing or paused
+        if !state.is_stopped() {
+            if state.is_printing() {
+                // since we're printing there must be printing data
+                let printing_data = state.printing_data_mut().unwrap();
+                if let Some(res) = printing_data.decoder.next() {
+                    let (action, code) = match res {
+                        Ok(t) => t,
+                        Err(e) => {
+                            // FIXME alert hwctrl of error
+                            error_send.send(ControlComms::Msg(e.into())).unwrap();
+                            state.stop();
+                            continue;
+                        }
+                    };
+                    // FIXME maybe use Ordering::Relaxed since it doesn't really matter?
+                    printing_data
+                        .line
+                        .store(code.span().line(), Ordering::Release);
+                    debug!(target: target::PUBLIC, "Executing {}", code);
+                    send_err!(exec.exec(action), error_send)
+                // if there's nothing from the decoder, we're done printing
+                } else {
+                    // FIXME alert hwctrl of finish
+                    state.stop();
+                }
+            // if we're not stopped but also not printing we must be paused
+            // in that case we really only need to wait to get unpaused or stopped
             } else {
-                // FIXME alert hwctrl of finish
-                state.stop();
+                handle_ctrl_msg!(executor_ctrl_recv.recv().unwrap())
             }
         } else {
             // TODO run manual movement commands through decoder somehow
