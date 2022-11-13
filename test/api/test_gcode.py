@@ -12,6 +12,7 @@ def test_gcode_stopped(server):
 
 def _start_benchy(server):
     path = 'test_data/gcode/benchy_first_layer.gcode'
+    path = os.path.abspath(path)
     r = server.post('/v0/gcode/start', json={'path': path})
     assert r.status_code == 202
     r = server.get('/v0/gcode')

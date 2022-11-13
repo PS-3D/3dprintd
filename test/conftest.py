@@ -114,6 +114,7 @@ def server(tmp_path):
 def prep_file(tmp_path):
     def _prep_file(path, perms=None):
         path = shutil.copy(path, tmp_path)
+        path = os.path.abspath(path)
         if perms != None:
             os.chmod(path, perms)
         return path
