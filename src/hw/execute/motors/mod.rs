@@ -478,7 +478,13 @@ impl Motors {
         ))
     }
 
+    fn sleep(&self) {
+        // sleep so we don't rush through all commands
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
     pub fn init(&mut self) -> Result<()> {
+        self.sleep();
         Ok(())
     }
 
@@ -487,6 +493,7 @@ impl Motors {
         _settings: &Settings,
         _params: ReferenceRunOptParameters,
     ) -> Result<()> {
+        self.sleep();
         Ok(())
     }
 
@@ -495,6 +502,7 @@ impl Motors {
         _settings: &Settings,
         _params: ReferenceRunOptParameters,
     ) -> Result<()> {
+        self.sleep();
         Ok(())
     }
 
@@ -503,22 +511,27 @@ impl Motors {
         _settings: &Settings,
         _params: ReferenceRunOptParameters,
     ) -> Result<()> {
+        self.sleep();
         Ok(())
     }
 
     pub fn move_all(&mut self, _m: &Movement, _config: &Config) -> Result<()> {
+        self.sleep();
         Ok(())
     }
 
     pub fn move_x(&mut self, _m: &AxisMovement) -> Result<(), MotorError> {
+        self.sleep();
         Ok(())
     }
 
     pub fn move_y(&mut self, _m: &AxisMovement) -> Result<(), MotorError> {
+        self.sleep();
         Ok(())
     }
 
     pub fn move_z(&mut self, _m: &AxisMovement) -> Result<(), MotorError> {
+        self.sleep();
         Ok(())
     }
 }
