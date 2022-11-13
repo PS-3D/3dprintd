@@ -1,3 +1,4 @@
+import os.path
 import json
 
 
@@ -39,7 +40,7 @@ def test_gcode_start_no_open(server, prep_file):
 def test_gcode_stop(server):
     server.start()
     _start_benchy(server)
-    r = server.post('/v0/stop')
+    r = server.post('/v0/gcode/stop')
     assert r.status_code == 202
     r = server.get('/v0/gcode')
     assert r.status_code == 200
@@ -50,7 +51,7 @@ def test_gcode_stop(server):
 
 def _start_benchy_pause(server):
     path = _start_benchy(server)
-    r = server.post('/v0/pause')
+    r = server.post('/v0/gcode/pause')
     assert r.status_code == 202
     r = server.get('/v0/gcode')
     assert r.status_code == 200
@@ -68,7 +69,7 @@ def test_gcode_pause(server):
 def test_gcode_continue(server):
     server.start()
     path = _start_benchy_pause(server)
-    r = server.post('/v0/continue')
+    r = server.post('/v0/gcode/continue')
     assert r.status_code == 202
     r = server.get('/v0/gcode')
     assert r.status_code == 200

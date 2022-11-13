@@ -50,7 +50,7 @@ class Server():
         self._proc = subprocess.Popen(f'cargo run -q {self._cargo_args} -- -c {self._cfg_path} -p {self._port} -l trace'.split(),
                                      stdin=subprocess.DEVNULL)
         # wait for server to start, shouldn't take too long
-        time.sleep(.2)
+        time.sleep(.3)
 
     def start(self, cfg=None, cfg_path=None):
         if self._proc != None or self._cfg_path != None:
