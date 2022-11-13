@@ -1,3 +1,8 @@
+// makes everything a bit more clear instead of annotating the inputs
+// isn't really that big of a deal since this flag should only be used
+// in development anyways
+#![cfg_attr(feature = "dev_no_motors", allow(unused_imports, unused_macros))]
+
 pub mod error;
 
 use self::error::{MotorError, MotorsError};
@@ -11,6 +16,8 @@ use crate::{
     settings::Settings,
 };
 use anyhow::{ensure, Context, Result};
+// we want to mask the EStop struct for the dev_no_motors build since otherwise
+// that would make the build fail
 #[cfg(not(feature = "dev_no_motors"))]
 use nanotec_stepper_driver::EStop;
 use nanotec_stepper_driver::{
@@ -450,7 +457,7 @@ pub struct EStop {}
 
 #[cfg(feature = "dev_no_motors")]
 impl EStop {
-    pub fn estop(&mut self, millis: u64) -> Result<()> {
+    pub fn estop(&mut self, _millis: u64) -> Result<()> {
         Ok(())
     }
 }
