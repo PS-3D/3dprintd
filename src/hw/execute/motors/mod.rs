@@ -1,4 +1,4 @@
-// makes everything a bit more clear instead of annotating the inputs
+// makes everything a bit more clear instead of annotating the imports etc.
 // isn't really that big of a deal since this flag should only be used
 // in development anyways
 #![cfg_attr(feature = "dev_no_motors", allow(unused_imports, unused_macros))]
