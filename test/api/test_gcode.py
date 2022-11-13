@@ -37,6 +37,19 @@ def test_gcode_start_no_open(server, prep_file):
     assert r.status_code == 512
 
 
+def test_gcode_start_already_printing(server, prep_file):
+    server.start()
+    path = _start_benchy(server)
+    path2 = prep_file('test_data/gcode/benchy_first_layer.gcode', rename='benchy2.gcode')
+    r = server.post('/v0/gcode/start', json={'path': path2})
+    assert r.status_code == 409
+    r = server.get('/v0/gcode')
+    data = json.loads(r.text)
+    # assuming the response is still mostly the same as before, so we only check
+    # the path thats being printed
+    assert data['path'] == path
+
+
 def test_gcode_stop(server):
     server.start()
     _start_benchy(server)
@@ -67,6 +80,12 @@ def test_gcode_pause(server):
     _start_benchy_pause(server)
 
 
+def test_benchy_pause_stopped(server):
+    server.start()
+    r = server.post('/v0/gcode/pause')
+    assert r.status_code == 409
+
+
 def test_gcode_continue(server):
     server.start()
     path = _start_benchy_pause(server)
@@ -78,3 +97,9 @@ def test_gcode_continue(server):
     assert isinstance(data['line'], int)
     expected = {'status': 'printing', 'path': path, 'line': data['line']}
     assert data == expected
+
+
+def test_benchy_continue_stopped(server):
+    server.start()
+    r = server.post('/v0/gcode/continue')
+    assert r.status_code == 409

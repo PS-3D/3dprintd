@@ -112,8 +112,12 @@ def server(tmp_path):
 
 @pytest.fixture()
 def prep_file(tmp_path):
-    def _prep_file(path, perms=None):
-        path = shutil.copy(path, tmp_path)
+    def _prep_file(path, rename=None, perms=None):
+        if rename != None:
+            dst_path = os.path.join(tmp_path, rename)
+        else:
+            dst_path = tmp_path
+        path = shutil.copy(path, dst_path)
         path = os.path.abspath(path)
         if perms != None:
             os.chmod(path, perms)
