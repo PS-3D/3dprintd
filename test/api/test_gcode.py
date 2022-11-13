@@ -59,6 +59,7 @@ def _start_benchy_pause(server):
     assert isinstance(data['line'], int)
     expected = {'status': 'paused', 'path': path, 'line': data['line']}
     assert data == expected
+    return path
 
 
 def test_gcode_pause(server):
