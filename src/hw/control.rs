@@ -132,21 +132,21 @@ impl HwCtrl {
         let mut state = self.state.write().unwrap();
         ensure!(state.is_stopped(), StateError::NotStopped);
         self.executor_ctrl.print(path.clone())?;
-        let cur_line = state.print(path);
+        state.print(path);
         Ok(())
     }
 
     pub fn stop(&self) {
         let mut state = self.state.write().unwrap();
-        state.stop();
         self.executor_ctrl.stop();
+        state.stop();
     }
 
     pub fn try_play(&self) -> Result<(), StateError> {
         let mut state = self.state.write().unwrap();
         ensure_own!(!state.is_stopped(), StateError::Stopped);
-        state.play();
         self.executor_ctrl.play();
+        state.play();
         Ok(())
     }
 
@@ -156,8 +156,8 @@ impl HwCtrl {
     pub fn try_pause(&self) -> Result<(), StateError> {
         let mut state = self.state.write().unwrap();
         ensure_own!(!state.is_stopped(), StateError::Stopped);
-        state.pause();
         self.executor_ctrl.pause();
+        state.pause();
         Ok(())
     }
 
