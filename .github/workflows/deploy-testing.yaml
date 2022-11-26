@@ -1,0 +1,27 @@
+name: Deploy to testing
+on:
+  push:
+    branches:
+      - dev
+      - feature-github-actions
+  workflow_dispatch:
+jobs:
+  deploy-testing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: build docker image
+        run: docker build ci/test/ -t deploy-testing/build
+      - name: create docker container
+        run: docker create -v ${GITHUB_WORKSPACE}:/code/ --workdir /code/ --name=deploy-testing_build deploy-testing/build cargo build --features dev_no_pi,dev_no_motors
+      - name: build
+        run: docker start -a deploy-testing_build
+      - name: deploy to testing
+        uses: burnett01/rsync-deployments@5.2.1
+        with:
+          path: target/debug/ps3dprintd
+          remote_path: ${{ secrets.DEPLOY_TESTING_PATH }}
+          remote_host: ${{ secrets.DEPLOY_TESTING_HOST }}
+          remote_port: ${{ secrets.DEPLOY_TESTING_PORT }}
+          remote_user: ${{ secrets.DEPLOY_TESTING_USER }}
+          remote_key: ${{ secrets.DEPLOY_TESTING_KEY }}
