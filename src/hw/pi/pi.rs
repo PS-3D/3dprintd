@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use revpi::revpi_from_json;
 
+#[cfg(not(feature = "dev_no_pi"))]
 revpi_from_json!(InnerRevPi, "config.rsc");
 
 #[cfg(not(feature = "dev_no_pi"))]
