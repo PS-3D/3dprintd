@@ -16,7 +16,7 @@ enum DecoderExitComms {
 
 fn decoder_loop<D: Decoder>(
     mut decoder: D,
-    gcode_send: Sender<Result<(Action, GCode), DecoderError>>,
+    gcode_send: Sender<Option<Result<(Action, GCode), DecoderError>>>,
     decoder_exit_recv: Receiver<DecoderExitComms>,
 ) {
     let mut sel = Select::new();
@@ -26,8 +26,9 @@ fn decoder_loop<D: Decoder>(
         match sel.ready() {
             i if i == index_gcode_send => {
                 if let Some(next) = decoder.next() {
-                    gcode_send.send(next).unwrap();
+                    gcode_send.send(Some(next)).unwrap();
                 } else {
+                    gcode_send.send(None).unwrap();
                     break;
                 }
             }
@@ -51,7 +52,7 @@ pub struct ThreadedDecoder<D: Decoder + Send + 'static> {
     // if the decoder gets just dropped normally we move it out there and call join.
     // this ensures we don't send 2 messages to the decoder thread and then crash
     thread_handle: Option<JoinHandle<()>>,
-    gcode_recv: Receiver<Result<(Action, GCode), DecoderError>>,
+    gcode_recv: Receiver<Option<Result<(Action, GCode), DecoderError>>>,
     decoder_exit_send: Sender<DecoderExitComms>,
     marker: PhantomData<D>,
 }
@@ -92,10 +93,7 @@ impl<D: Decoder + Send + 'static> Iterator for ThreadedDecoder<D> {
     type Item = Result<(Action, GCode), DecoderError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.gcode_recv.recv() {
-            Ok(r) => Some(r),
-            Err(_) => None,
-        }
+        self.gcode_recv.recv().unwrap()
     }
 }
 
