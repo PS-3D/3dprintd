@@ -134,7 +134,7 @@ impl HwCtrl {
         Ok((
             estop_handle,
             Self {
-                state: Arc::new(RwLock::new(State::new())),
+                state,
                 settings,
                 executor_ctrl: Arc::new(executor_ctrl),
                 pi_ctrl,
