@@ -1,5 +1,6 @@
 import os.path
 import json
+import time
 
 
 def test_gcode_stopped(server):
@@ -11,8 +12,7 @@ def test_gcode_stopped(server):
     assert data == expected
 
 
-def _start_benchy(server):
-    path = 'test_data/gcode/benchy_first_layer.gcode'
+def _start_file(server, path):
     path = os.path.abspath(path)
     r = server.post('/v0/gcode/start', json={'path': path})
     assert r.status_code == 202
@@ -23,6 +23,11 @@ def _start_benchy(server):
     expected = {'status': 'printing', 'path': path, 'line': data['line']}
     assert data == expected
     return path
+
+
+def _start_benchy(server):
+    path = 'test_data/gcode/benchy_first_layer.gcode'
+    return _start_file(server, path)
 
 
 def test_gcode_start(server):
@@ -48,6 +53,18 @@ def test_gcode_start_already_printing(server, prep_file):
     # assuming the response is still mostly the same as before, so we only check
     # the path thats being printed
     assert data['path'] == path
+
+
+def test_gcode_end(server):
+    server.start()
+    path = _start_file(server, 'test_data/gcode/benchy_very_short.gcode')
+    r = server.get('/v0/gcode')
+    data = json.loads(r.text)
+    assert data['path'] == path
+    time.sleep(5)
+    r = server.get('/v0/gcode')
+    data = json.loads(r.text)
+    assert data == {'status': 'stopped'}
 
 
 def test_gcode_stop(server):

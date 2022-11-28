@@ -6,8 +6,9 @@ mod pi;
 mod state;
 
 use self::{
+    callbacks::{EStopCallback, StopCallback},
     comms::EStopComms,
-    execute::{ExecutorCtrl, OutOfBoundsError},
+    execute::{ExecutorCtrl, ExecutorStopper, OutOfBoundsError},
     pi::PiCtrl,
     state::{State, StateInfo as InnerStateInfo},
 };
@@ -64,6 +65,39 @@ pub struct PositionInfo {
     pub y: f64,
     pub z: f64,
 }
+
+struct ExecutorGCodeCallback {
+    state: Arc<RwLock<State>>,
+}
+
+impl ExecutorGCodeCallback {
+    fn new(state: Arc<RwLock<State>>) -> Self {
+        Self { state }
+    }
+}
+
+impl StopCallback for ExecutorGCodeCallback {
+    fn stop(&self) {
+        let mut state = self.state.write().unwrap();
+        // TODO maybe ensure that heaters etc. are turned off?
+        state.stop();
+    }
+}
+
+struct PiCtrlCallbacks {
+    // state: Arc<RwLock<State>>,
+    // executor_stopper: ExecutorStopper,
+    estop_send: Sender<ControlComms<EStopComms>>,
+}
+
+// TODO uncomment once estop on the pi thread is actually implemented
+// impl EStopCallback for PiCtrlCallbacks {
+//     fn estop(&self) {
+//         self.estop_send
+//             .send(ControlComms::Msg(EStopComms::EStop))
+//             .unwrap()
+//     }
+// }
 
 #[derive(Debug, Clone)]
 pub struct HwCtrl {
@@ -151,7 +185,10 @@ impl HwCtrl {
     pub fn try_print(&self, path: PathBuf) -> Result<()> {
         let mut state = self.state.write().unwrap();
         ensure!(state.is_stopped(), StateError::NotStopped);
-        self.executor_ctrl.print(path.clone())?;
+        self.executor_ctrl.print(
+            path.clone(),
+            Box::new(ExecutorGCodeCallback::new(Arc::clone(&self.state))),
+        )?;
         state.print(path);
         Ok(())
     }

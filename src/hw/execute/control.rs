@@ -1,4 +1,4 @@
-use super::{ExecutorCtrlComms, ExecutorManualComms, SharedRawPos};
+use super::{super::callbacks::StopCallback, ExecutorCtrlComms, ExecutorManualComms, SharedRawPos};
 use crate::{
     comms::{Axis, ControlComms, ReferenceRunOptParameters},
     settings::Settings,
@@ -65,9 +65,18 @@ impl ExecutorCtrl {
             .unwrap();
     }
 
-    pub fn print(&self, path: PathBuf) -> Result<()> {
+    // end_callback could in theory also be a generic but that would be
+    // 1. a pain in the ass to properly pass around that generic
+    // 2. since the callback is a new one every time, we could also allow
+    //    the actual type to be different every time
+    pub fn print(&self, path: PathBuf, end_callback: Box<dyn StopCallback>) -> Result<()> {
         let file = File::open(&path).context("failed to open gcode file")?;
-        self.send_executor_ctrl(ExecutorCtrlComms::Print(file, path, Arc::clone(&self.line)));
+        self.send_executor_ctrl(ExecutorCtrlComms::Print(
+            file,
+            path,
+            Arc::clone(&self.line),
+            end_callback,
+        ));
         Ok(())
     }
 

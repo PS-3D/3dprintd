@@ -5,6 +5,7 @@ mod motors;
 pub use self::control::{ExecutorCtrl, OutOfBoundsError};
 use self::{
     super::{
+        callbacks::StopCallback,
         comms::EStopComms,
         decode::State as DecoderState,
         decode::{Decoder, FileDecoder, ThreadedDecoder},
@@ -42,7 +43,7 @@ enum ExecutorCtrlComms {
     /// sends the already open file, the path to that file (for error messages)
     /// and an atomic that the currently executed line will be written into by
     /// the executor
-    Print(File, PathBuf, Arc<AtomicUsize>),
+    Print(File, PathBuf, Arc<AtomicUsize>, Box<dyn StopCallback>),
     Stop,
     Play,
     Pause,
@@ -69,6 +70,7 @@ enum InnerState {
 pub(self) struct PrintingData {
     pub decoder: ThreadedDecoder<FileDecoder>,
     pub line: Arc<AtomicUsize>,
+    pub end_callback: Box<dyn StopCallback>,
 }
 
 struct State {
@@ -84,7 +86,14 @@ impl State {
         }
     }
 
-    pub fn print(&mut self, settings: Settings, file: File, path: PathBuf, line: Arc<AtomicUsize>) {
+    pub fn print(
+        &mut self,
+        settings: Settings,
+        file: File,
+        path: PathBuf,
+        line: Arc<AtomicUsize>,
+        end_callback: Box<dyn StopCallback>,
+    ) {
         match &self.inner {
             InnerState::Stopped(_) => {
                 let decoder_state = match mem::replace(&mut self.inner, InnerState::Printing) {
@@ -98,12 +107,17 @@ impl State {
                     path,
                 ))
                 .expect("starting the decoder thread failed");
-                self.data = Some(PrintingData { decoder, line })
+                self.data = Some(PrintingData {
+                    decoder,
+                    line,
+                    end_callback,
+                })
             }
             _ => panic!("printer is already printing/paused"),
         }
     }
 
+    /// stops the executor state without calling the end callback
     pub fn stop(&mut self) {
         match self.inner {
             InnerState::Stopped(_) => (),
@@ -111,6 +125,20 @@ impl State {
                 let mut decoder_state = self.data.take().unwrap().decoder.state();
                 decoder_state.reset();
                 self.inner = InnerState::Stopped(decoder_state);
+            }
+        }
+    }
+
+    /// stops the executor and also calls the end callback
+    pub fn finish(&mut self) {
+        match self.inner {
+            InnerState::Stopped(_) => panic!("can't finish, not printing"),
+            _ => {
+                let mut printing_data = self.data.take().unwrap();
+                printing_data.end_callback.stop();
+                let mut decoder_state = printing_data.decoder.state();
+                decoder_state.reset();
+                self.inner = InnerState::Stopped(decoder_state)
             }
         }
     }
@@ -175,9 +203,9 @@ fn executor_loop(
         ($msg:expr) => {{
             match $msg {
                 ControlComms::Msg(c) => match c {
-                    ExecutorCtrlComms::Print(file, path, line) => {
+                    ExecutorCtrlComms::Print(file, path, line, end_callback) => {
                         debug!(target: target::INTERNAL, "executor thread starting print");
-                        state.print(settings.clone(), file, path, line);
+                        state.print(settings.clone(), file, path, line, end_callback);
                     }
                     ExecutorCtrlComms::Stop => {
                         debug!(target: target::INTERNAL, "executor thread stopping");
@@ -238,8 +266,7 @@ fn executor_loop(
                     send_err!(exec.exec(action), error_send)
                 // if there's nothing from the decoder, we're done printing
                 } else {
-                    // FIXME alert hwctrl of finish
-                    state.stop();
+                    state.finish();
                 }
             // if we're not stopped but also not printing we must be paused
             // in that case we really only need to wait to get unpaused or stopped
@@ -384,6 +411,8 @@ impl ExecutorStopper {
     }
 
     fn started(&self) -> &Sender<ControlComms<ExecutorCtrlComms>> {
+        // FIXME don't panic, no reason why the thread not being started
+        // should inhibit stopping it
         if self.unstarted_data.get().is_none() {
             &self.exec_ctrl_send
         } else {
