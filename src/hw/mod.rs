@@ -1,5 +1,5 @@
+mod callbacks;
 mod comms;
-mod control;
 mod decode;
 mod execute;
 mod pi;
