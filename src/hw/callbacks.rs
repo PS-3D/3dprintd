@@ -36,3 +36,17 @@
 //! 4. ... ?
 //!
 //! Of course we chose option 3 because it is the somewhat cleanest and easiest.
+
+use std::error::Error;
+
+pub trait ErrorCallback {
+    fn err<E: Error>(&self, err: E);
+}
+
+pub trait StopCallback {
+    fn stop(&self);
+}
+
+pub trait EStopCallback {
+    fn estop(&self);
+}
