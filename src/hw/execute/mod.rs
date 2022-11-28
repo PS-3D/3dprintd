@@ -25,6 +25,7 @@ use crossbeam::{
     channel::{self, Receiver, Sender, TryRecvError},
     select,
 };
+use once_cell::sync::OnceCell;
 use std::{
     fs::File,
     mem,
@@ -265,91 +266,153 @@ fn executor_loop(
     }
 }
 
-pub fn start(
-    settings: Settings,
-    pi_ctrl: Arc<PiCtrl>,
-    estop_recv: Receiver<ControlComms<EStopComms>>,
-    error_send: Sender<ControlComms<Error>>,
-) -> Result<(JoinHandle<()>, ExecutorCtrl)> {
-    let (executor_ctrl_send, executor_ctrl_recv) = channel::unbounded();
-    let (executor_manual_send, executor_manual_recv) = channel::unbounded();
-    let (setup_send, setup_recv) = channel::bounded(1);
-    let settings_clone = settings.clone();
-    let shared_pos = SharedRawPos::default();
-    let shared_pos_clone = shared_pos.clone();
-    let shared_z_hotend_location =
-        Arc::new(AtomicF64::new(-(settings.config().motors.z.limit as f64)));
-    let shared_z_hotend_location_clone = shared_z_hotend_location.clone();
-    // do it this way all in the executorhread because we can't send motors between
-    // threads. We then send the result of the setup via the above channel.
-    // the setup is all in a function so we can use the ? operator for convenience
-    let executor_handle = thread::Builder::new()
-        .name(String::from("executor"))
-        .spawn(move || {
-            fn setup(
-                settings: &Settings,
-                estop_recv: Receiver<ControlComms<EStopComms>>,
-                shared_pos: SharedRawPos,
-            ) -> Result<(Motors, JoinHandle<()>)> {
-                let (mut motors, mut estop) = Motors::new(settings.clone(), shared_pos)?;
-                let estop_handle = thread::Builder::new()
-                    .name(String::from("estop"))
-                    .spawn(move || {
-                        loop {
-                            match estop_recv
-                                .recv()
-                                .expect("estop channel was unexpectedly closed")
-                            {
-                                // if there's an IO error writing, it's probably a good plan to
-                                // panic
-                                ControlComms::Msg(m) => match m {
-                                    EStopComms::EStop => {
-                                        info!(target: target::PUBLIC, "executing estop");
-                                        estop.estop(2000).unwrap()
+/// Stops the executor thread
+///
+/// In theory this could be done via [`ExecutorCtrl`] but then the executor
+/// thread would need to be already running. For more information see
+/// [`hw::callbacks`][super::callbacks]
+#[derive(Debug, Clone)]
+pub struct ExecutorStopper {
+    unstarted_data: OnceCell<Receiver<ControlComms<ExecutorCtrlComms>>>,
+    exec_ctrl_send: Sender<ControlComms<ExecutorCtrlComms>>,
+}
+
+impl ExecutorStopper {
+    pub(self) fn init() -> Self {
+        let (exec_ctrl_send, exec_ctrl_recv) = channel::unbounded();
+        Self {
+            unstarted_data: OnceCell::with_value(exec_ctrl_recv),
+            exec_ctrl_send,
+        }
+    }
+
+    pub(self) fn start_executor(
+        &mut self,
+        settings: Settings,
+        pi_ctrl: Arc<PiCtrl>,
+        estop_recv: Receiver<ControlComms<EStopComms>>,
+        error_send: Sender<ControlComms<Error>>,
+    ) -> Result<(JoinHandle<()>, ExecutorCtrl)> {
+        let exec_ctrl_recv = self
+            .unstarted_data
+            .take()
+            .expect("can't initialize executor thread twice");
+        let exec_ctrl_send = self.exec_ctrl_send.clone();
+        let (executor_manual_send, executor_manual_recv) = channel::unbounded();
+        let (setup_send, setup_recv) = channel::bounded(1);
+        let settings_clone = settings.clone();
+        let shared_pos = SharedRawPos::default();
+        let shared_pos_clone = shared_pos.clone();
+        let shared_z_hotend_location =
+            Arc::new(AtomicF64::new(-(settings.config().motors.z.limit as f64)));
+        let shared_z_hotend_location_clone = shared_z_hotend_location.clone();
+        // do it this way all in the executorhread because we can't send motors between
+        // threads. We then send the result of the setup via the above channel.
+        // the setup is all in a function so we can use the ? operator for convenience
+        let executor_handle = thread::Builder::new()
+            .name(String::from("executor"))
+            .spawn(move || {
+                fn setup(
+                    settings: &Settings,
+                    estop_recv: Receiver<ControlComms<EStopComms>>,
+                    shared_pos: SharedRawPos,
+                ) -> Result<(Motors, JoinHandle<()>)> {
+                    let (mut motors, mut estop) = Motors::new(settings.clone(), shared_pos)?;
+                    let estop_handle = thread::Builder::new()
+                        .name(String::from("estop"))
+                        .spawn(move || {
+                            loop {
+                                match estop_recv
+                                    .recv()
+                                    .expect("estop channel was unexpectedly closed")
+                                {
+                                    // if there's an IO error writing, it's probably a good plan to
+                                    // panic
+                                    ControlComms::Msg(m) => match m {
+                                        EStopComms::EStop => {
+                                            info!(target: target::PUBLIC, "executing estop");
+                                            estop.estop(2000).unwrap()
+                                        }
+                                    },
+                                    ControlComms::Exit => {
+                                        debug!(
+                                            target: target::INTERNAL,
+                                            "received exit, exiting..."
+                                        );
+                                        break;
                                     }
-                                },
-                                ControlComms::Exit => {
-                                    debug!(target: target::INTERNAL, "received exit, exiting...");
-                                    break;
                                 }
                             }
-                        }
-                    })
-                    .context("Creating the estop thread failed")?;
-                motors.init()?;
-                Ok((motors, estop_handle))
-            }
-            let shared_z_pos_raw = Arc::clone(&shared_pos_clone.z);
-            match setup(&settings, estop_recv, shared_pos_clone) {
-                Ok((motors, estop_handle)) => {
-                    let executor = Executor::new(settings.clone(), motors, pi_ctrl);
-                    setup_send.send(Ok(estop_handle)).unwrap();
-                    executor_loop(
-                        settings,
-                        executor,
-                        executor_ctrl_recv,
-                        executor_manual_recv,
-                        shared_z_pos_raw,
-                        shared_z_hotend_location_clone,
-                        error_send,
-                    );
+                        })
+                        .context("Creating the estop thread failed")?;
+                    motors.init()?;
+                    Ok((motors, estop_handle))
                 }
-                Err(e) => {
-                    setup_send.send(Err(e)).unwrap();
+                let shared_z_pos_raw = Arc::clone(&shared_pos_clone.z);
+                match setup(&settings, estop_recv, shared_pos_clone) {
+                    Ok((motors, estop_handle)) => {
+                        let executor = Executor::new(settings.clone(), motors, pi_ctrl);
+                        setup_send.send(Ok(estop_handle)).unwrap();
+                        executor_loop(
+                            settings,
+                            executor,
+                            exec_ctrl_recv,
+                            executor_manual_recv,
+                            shared_z_pos_raw,
+                            shared_z_hotend_location_clone,
+                            error_send,
+                        );
+                    }
+                    Err(e) => {
+                        setup_send.send(Err(e)).unwrap();
+                    }
                 }
-            }
-        })
-        .context("Creating the executor thread failed")?;
-    let estop_handle = setup_recv.recv().unwrap()?;
-    Ok((
-        estop_handle,
-        ExecutorCtrl::new(
-            settings_clone,
-            executor_handle,
-            executor_ctrl_send,
-            executor_manual_send,
-            shared_pos,
-            shared_z_hotend_location,
-        ),
-    ))
+            })
+            .context("Creating the executor thread failed")?;
+        let estop_handle = setup_recv.recv().unwrap()?;
+        Ok((
+            estop_handle,
+            ExecutorCtrl::new(
+                settings_clone,
+                executor_handle,
+                exec_ctrl_send,
+                executor_manual_send,
+                shared_pos,
+                shared_z_hotend_location,
+            ),
+        ))
+    }
+
+    fn started(&self) -> &Sender<ControlComms<ExecutorCtrlComms>> {
+        if self.unstarted_data.get().is_none() {
+            &self.exec_ctrl_send
+        } else {
+            panic!("executor thread is not yet started")
+        }
+    }
+
+    pub fn stop(&self) {
+        self.started()
+            .send(ControlComms::Msg(ExecutorCtrlComms::Stop))
+            .unwrap()
+    }
+}
+
+pub fn init() -> (
+    ExecutorStopper,
+    impl FnOnce(
+        Settings,
+        Arc<PiCtrl>,
+        Receiver<ControlComms<EStopComms>>,
+        Sender<ControlComms<Error>>,
+    ) -> Result<(JoinHandle<()>, ExecutorCtrl)>,
+) {
+    let exec_stopper = ExecutorStopper::init();
+    let mut exec_stopper_clone = exec_stopper.clone();
+    (
+        exec_stopper,
+        move |settings, pi_ctrl, estop_recv, error_send| {
+            exec_stopper_clone.start_executor(settings, pi_ctrl, estop_recv, error_send)
+        },
+    )
 }
