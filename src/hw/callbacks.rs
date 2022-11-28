@@ -39,14 +39,14 @@
 
 use std::error::Error;
 
-pub trait ErrorCallback {
+pub trait ErrorCallback: Send {
     fn err<E: Error>(&self, err: E);
 }
 
-pub trait StopCallback {
+pub trait StopCallback: Send {
     fn stop(&self);
 }
 
-pub trait EStopCallback {
+pub trait EStopCallback: Send {
     fn estop(&self);
 }
