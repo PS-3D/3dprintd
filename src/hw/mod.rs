@@ -131,6 +131,9 @@ impl HwCtrl {
         let (exec_stopper, exec_start) = execute::init();
         let (estop_handle, executor_ctrl) =
             exec_start(settings.clone(), pi_ctrl.clone(), estop_recv, error_send)?;
+        // since we're done with the setup we can unlock state to be able to move
+        // it
+        drop(_lock);
         Ok((
             estop_handle,
             Self {
