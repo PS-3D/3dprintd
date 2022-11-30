@@ -125,7 +125,8 @@ impl HwCtrl {
         // lock state so we have sole control over the state and noone else
         // can for example report an error until all parts are fully initialised
         let _lock = state.write().unwrap();
-        let pi_ctrl = pi::start(settings.clone(), error_send.clone())?;
+        let (pi_stopper, pi_start) = pi::init();
+        let pi_ctrl = pi_start(settings.clone(), error_send.clone())?;
         let pi_ctrl = Arc::new(pi_ctrl);
         let (estop_send, estop_recv) = channel::unbounded();
         let (exec_stopper, exec_start) = execute::init();
