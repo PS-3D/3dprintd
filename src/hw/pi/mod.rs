@@ -303,7 +303,9 @@ impl PiThreadData {
         if let Err(e) = self.pi.write_hotend_heat(false) {
             errors.push(e.into());
         }
-        self.pi.write_hotend_fan(false);
+        if let Err(e) = self.pi.write_hotend_fan(false) {
+            errors.push(e.into());
+        }
         if let Err(e) = self.pi.write_bed_heat(false) {
             errors.push(e.into());
         }

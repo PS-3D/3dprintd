@@ -26,7 +26,7 @@ impl RevPi {
         self.inner.set_hotend_heating(state).map_err(|e| e.into())
     }
 
-    pub fn write_hotend_fan(&self, state: bool) {
+    pub fn write_hotend_fan(&self, state: bool) -> Result<()> {
         todo!()
     }
 
@@ -72,7 +72,9 @@ impl RevPi {
         Ok(())
     }
 
-    pub fn write_hotend_fan(&self, _state: bool) {}
+    pub fn write_hotend_fan(&self, _state: bool) -> Result<()> {
+        Ok(())
+    }
 
     pub fn write_bed_heat(&self, _state: bool) -> Result<()> {
         Ok(())
