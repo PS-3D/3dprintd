@@ -5,6 +5,7 @@ mod motors;
 pub use self::control::{ExecutorCtrl, OutOfBoundsError};
 use self::{
     super::{
+        callbacks::ErrorCallback,
         callbacks::StopCallback,
         comms::EStopComms,
         decode::State as DecoderState,
@@ -18,9 +19,8 @@ use crate::{
     comms::{Axis, ControlComms, ReferenceRunOptParameters},
     log::target,
     settings::Settings,
-    util::send_err,
 };
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Result};
 use atomic_float::AtomicF64;
 use crossbeam::{
     channel::{self, Receiver, Sender, TryRecvError},
@@ -188,14 +188,14 @@ impl State {
 // the z position properly
 // the actual z_hotend_location is set seperately and is not an atomic because
 // it doesn't need to be
-fn executor_loop(
+fn executor_loop<C: ErrorCallback>(
     settings: Settings,
     mut exec: Executor,
     executor_ctrl_recv: Receiver<ControlComms<ExecutorCtrlComms>>,
     executor_manual_recv: Receiver<ExecutorManualComms>,
     shared_z_pos_raw: Arc<AtomicI32>,
     shared_z_hotend_location: Arc<AtomicF64>,
-    error_send: Sender<ControlComms<Error>>,
+    callbacks: C,
 ) {
     let mut state = State::new(shared_z_hotend_location.load(Ordering::Acquire));
     // has to be macro so break will work
@@ -252,8 +252,7 @@ fn executor_loop(
                     let (action, code) = match res {
                         Ok(t) => t,
                         Err(e) => {
-                            // FIXME alert hwctrl of error
-                            error_send.send(ControlComms::Msg(e.into())).unwrap();
+                            callbacks.err(e.into());
                             state.stop();
                             continue;
                         }
@@ -263,7 +262,11 @@ fn executor_loop(
                         .line
                         .store(code.span().line(), Ordering::Release);
                     debug!(target: target::PUBLIC, "Executing {}", code);
-                    send_err!(exec.exec(action), error_send)
+                    if let Err(e) = exec.exec(action) {
+                        callbacks.err(e);
+                        state.stop();
+                        continue;
+                    }
                 // if there's nothing from the decoder, we're done printing
                 } else {
                     state.finish();
@@ -278,7 +281,11 @@ fn executor_loop(
             select! {
                 recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
                 recv(executor_manual_recv) -> msg => match msg.unwrap() {
-                    ExecutorManualComms::ReferenceAxis(axis, parameters) => send_err!(exec.exec_reference_axis(axis, parameters), error_send),
+                    ExecutorManualComms::ReferenceAxis(axis, parameters) => {
+                        if let Err(e) = exec.exec_reference_axis(axis, parameters) {
+                            callbacks.err(e);
+                        }
+                    },
                     ExecutorManualComms::ReferenceZAxisHotend => {
                         let pos_steps = shared_z_pos_raw.load(Ordering::Acquire);
                         let pos_mm = settings.config().motors.z.steps_to_mm(pos_steps);
@@ -313,12 +320,12 @@ impl ExecutorStopper {
         }
     }
 
-    pub(self) fn start_executor(
+    pub(self) fn start_executor<C: ErrorCallback + 'static>(
         &mut self,
         settings: Settings,
         pi_ctrl: Arc<PiCtrl>,
         estop_recv: Receiver<ControlComms<EStopComms>>,
-        error_send: Sender<ControlComms<Error>>,
+        callbacks: C,
     ) -> Result<(JoinHandle<()>, ExecutorCtrl)> {
         let exec_ctrl_recv = self
             .unstarted_data
@@ -387,7 +394,7 @@ impl ExecutorStopper {
                             executor_manual_recv,
                             shared_z_pos_raw,
                             shared_z_hotend_location_clone,
-                            error_send,
+                            callbacks,
                         );
                     }
                     Err(e) => {
@@ -427,13 +434,13 @@ impl ExecutorStopper {
     }
 }
 
-pub fn init() -> (
+pub fn init<C: ErrorCallback + 'static>() -> (
     ExecutorStopper,
     impl FnOnce(
         Settings,
         Arc<PiCtrl>,
         Receiver<ControlComms<EStopComms>>,
-        Sender<ControlComms<Error>>,
+        C,
     ) -> Result<(JoinHandle<()>, ExecutorCtrl)>,
 ) {
     let exec_stopper = ExecutorStopper::init();

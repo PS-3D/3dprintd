@@ -6,7 +6,7 @@ mod pi;
 mod state;
 
 use self::{
-    callbacks::{EStopCallback, StopCallback},
+    callbacks::{EStopCallback, ErrorCallback, StopCallback},
     comms::EStopComms,
     execute::{ExecutorCtrl, ExecutorStopper, OutOfBoundsError},
     pi::PiCtrl,
@@ -84,6 +84,35 @@ impl StopCallback for ExecutorGCodeCallback {
     }
 }
 
+struct ExecutorCallbacks {
+    state: Arc<RwLock<State>>,
+    pi_ctrl: Arc<PiCtrl>,
+    error_send: Sender<ControlComms<Error>>,
+}
+
+impl ExecutorCallbacks {
+    fn new(
+        state: Arc<RwLock<State>>,
+        pi_ctrl: Arc<PiCtrl>,
+        error_send: Sender<ControlComms<Error>>,
+    ) -> Self {
+        Self {
+            state,
+            pi_ctrl,
+            error_send,
+        }
+    }
+}
+
+impl ErrorCallback for ExecutorCallbacks {
+    fn err(&self, err: Error) {
+        let mut state = self.state.write().unwrap();
+        state.stop();
+        self.pi_ctrl.stop();
+        self.error_send.send(ControlComms::Msg(err)).unwrap()
+    }
+}
+
 struct PiCtrlCallbacks {
     // state: Arc<RwLock<State>>,
     // executor_stopper: ExecutorStopper,
@@ -130,8 +159,12 @@ impl HwCtrl {
         let pi_ctrl = Arc::new(pi_ctrl);
         let (estop_send, estop_recv) = channel::unbounded();
         let (exec_stopper, exec_start) = execute::init();
-        let (estop_handle, executor_ctrl) =
-            exec_start(settings.clone(), pi_ctrl.clone(), estop_recv, error_send)?;
+        let (estop_handle, executor_ctrl) = exec_start(
+            settings.clone(),
+            pi_ctrl.clone(),
+            estop_recv,
+            ExecutorCallbacks::new(Arc::clone(&state), pi_ctrl.clone(), error_send),
+        )?;
         // since we're done with the setup we can unlock state to be able to move
         // it
         drop(_lock);

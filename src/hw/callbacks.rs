@@ -37,10 +37,10 @@
 //!
 //! Of course we chose option 3 because it is the somewhat cleanest and easiest.
 
-use std::error::Error;
+use anyhow::Error;
 
 pub trait ErrorCallback: Send {
-    fn err<E: Error>(&self, err: E);
+    fn err(&self, err: Error);
 }
 
 pub trait StopCallback: Send {
