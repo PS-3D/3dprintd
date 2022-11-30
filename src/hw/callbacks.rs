@@ -43,6 +43,16 @@ pub trait ErrorCallback: Send {
     fn err(&self, err: Error);
 }
 
+macro_rules! callback_err {
+    ($result:expr, $callback:ident) => {{
+        if let Err(e) = $result {
+            $callback.err(e.into())
+        }
+    }};
+}
+
+pub(crate) use callback_err;
+
 pub trait StopCallback: Send {
     fn stop(&self);
 }

@@ -5,8 +5,7 @@ mod motors;
 pub use self::control::{ExecutorCtrl, OutOfBoundsError};
 use self::{
     super::{
-        callbacks::ErrorCallback,
-        callbacks::StopCallback,
+        callbacks::{callback_err, ErrorCallback, StopCallback},
         comms::EStopComms,
         decode::State as DecoderState,
         decode::{Decoder, FileDecoder, ThreadedDecoder},
@@ -282,9 +281,7 @@ fn executor_loop<C: ErrorCallback>(
                 recv(executor_ctrl_recv) -> msg => handle_ctrl_msg!(msg.unwrap()),
                 recv(executor_manual_recv) -> msg => match msg.unwrap() {
                     ExecutorManualComms::ReferenceAxis(axis, parameters) => {
-                        if let Err(e) = exec.exec_reference_axis(axis, parameters) {
-                            callbacks.err(e);
-                        }
+                        callback_err!(exec.exec_reference_axis(axis,parameters), callbacks);
                     },
                     ExecutorManualComms::ReferenceZAxisHotend => {
                         let pos_steps = shared_z_pos_raw.load(Ordering::Acquire);
