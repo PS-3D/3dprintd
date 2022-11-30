@@ -2,13 +2,11 @@ mod error;
 mod pi;
 
 pub use self::error::{ExitError, PiCtrlError, WaitTempError};
-use self::pi::RevPi;
-use crate::{
-    comms::ControlComms,
-    log::target,
-    settings::Settings,
-    util::{ensure_own, send_err},
+use self::{
+    super::callbacks::{callback_err, EStopCallback, ErrorCallback},
+    pi::RevPi,
 };
+use crate::{comms::ControlComms, log::target, settings::Settings, util::ensure_own};
 use anyhow::{Context, Error, Result};
 use crossbeam::channel::{self, Receiver, Sender, TryRecvError};
 use once_cell::sync::OnceCell;
@@ -312,9 +310,8 @@ impl PiThreadData {
         self.bed_min_waiting.insert(min_temp, notify_send);
     }
 
-    // FIXME add atomic bool that acts like an enable/disable
-    pub fn estop(&mut self) -> Result<(), Vec<Error>> {
-        let mut errors = Vec::with_capacity(3);
+    fn stop_all(&mut self) -> Result<(), Vec<Error>> {
+        let mut errors: Vec<Error> = Vec::with_capacity(3);
         if let Err(e) = self.pi.write_hotend_heat(false) {
             errors.push(e.into());
         }
@@ -331,20 +328,35 @@ impl PiThreadData {
         }
     }
 
+    // FIXME add atomic bool that acts like an enable/disable
+    pub fn estop(&mut self) {
+        if let Err(errors) = self.stop_all() {
+            let mut errors_str = String::new();
+            for e in errors {
+                errors_str.push_str(&format!("{}\n", e))
+            }
+            // TODO maybe not panic?
+            panic!(
+                "Multiple errors occured while trying to emergency stop: {}",
+                errors_str
+            );
+        }
+    }
+
     /// see also [`ExitError`]
     pub fn exit(mut self) -> Result<(), ExitError> {
-        let res = self.estop();
+        let res = self.stop_all();
         self.set_hotend_target(None);
         self.set_bed_target(None);
         res.map_err(|e| ExitError(e))
     }
 }
 
-fn pi_loop(
+fn pi_loop<C: ErrorCallback + EStopCallback + 'static>(
     settings: Settings,
     mut data: PiThreadData,
     pi_recv: Receiver<PiComms>,
-    error_send: Sender<ControlComms<Error>>,
+    callbacks: C,
 ) {
     loop {
         match pi_recv.try_recv() {
@@ -368,18 +380,12 @@ fn pi_loop(
                                 data.set_hotend_target(None);
                                 data.set_bed_target(None);
                             }
-                            InnerPiComms::EStop => {
-                                if let Err(es) = data.estop() {
-                                    for e in es {
-                                        error_send.send(ControlComms::Msg(e)).unwrap();
-                                    }
-                                }
-                            }
+                            InnerPiComms::EStop => data.estop(),
                         }
                     }
                     ControlComms::Exit => {
                         debug!(target: target::INTERNAL, "received exit, exiting...");
-                        send_err!(data.exit(), error_send);
+                        callback_err!(data.exit(), callbacks);
                         break;
                     }
                 }
@@ -392,8 +398,8 @@ fn pi_loop(
             },
         }
         thread::sleep(Duration::from_millis(settings.config().pi.check_interval));
-        send_err!(data.update_hotend_heat(), error_send);
-        send_err!(data.update_bed_heat(), error_send);
+        callback_err!(data.update_hotend_heat(), callbacks);
+        callback_err!(data.update_bed_heat(), callbacks);
     }
 }
 
@@ -412,10 +418,10 @@ impl PiStopper {
         }
     }
 
-    pub(self) fn start_pi(
+    pub(self) fn start_pi<C: ErrorCallback + EStopCallback + 'static>(
         &mut self,
         settings: Settings,
-        error_send: Sender<ControlComms<Error>>,
+        callbacks: C,
     ) -> Result<PiCtrl> {
         let pi_recv = self
             .unstarted_data
@@ -427,7 +433,7 @@ impl PiStopper {
         let settings_clone = settings.clone();
         let handle = thread::Builder::new()
             .name(String::from("pi"))
-            .spawn(move || pi_loop(settings_clone, pi_thread_data, pi_recv, error_send))
+            .spawn(move || pi_loop(settings_clone, pi_thread_data, pi_recv, callbacks))
             .context("Creating the pi thread failed")?;
         Ok(PiCtrl::new(
             settings,
@@ -461,13 +467,11 @@ impl PiStopper {
     }
 }
 
-pub fn init() -> (
-    PiStopper,
-    impl FnOnce(Settings, Sender<ControlComms<Error>>) -> Result<PiCtrl>,
-) {
+pub fn init<C: ErrorCallback + EStopCallback + 'static>(
+) -> (PiStopper, impl FnOnce(Settings, C) -> Result<PiCtrl>) {
     let pi_stopper = PiStopper::init();
     let mut pi_stopper_clone = pi_stopper.clone();
-    (pi_stopper, move |settings, error_send| {
-        pi_stopper_clone.start_pi(settings, error_send)
+    (pi_stopper, move |settings, callbacks| {
+        pi_stopper_clone.start_pi(settings, callbacks)
     })
 }

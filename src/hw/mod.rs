@@ -91,7 +91,7 @@ struct ExecutorCallbacks {
 }
 
 impl ExecutorCallbacks {
-    fn new(
+    pub(self) fn new(
         state: Arc<RwLock<State>>,
         pi_ctrl: Arc<PiCtrl>,
         error_send: Sender<ControlComms<Error>>,
@@ -113,20 +113,45 @@ impl ErrorCallback for ExecutorCallbacks {
     }
 }
 
-struct PiCtrlCallbacks {
-    // state: Arc<RwLock<State>>,
-    // executor_stopper: ExecutorStopper,
+struct PiCallbacks {
+    state: Arc<RwLock<State>>,
+    executor_stopper: ExecutorStopper,
     estop_send: Sender<ControlComms<EStopComms>>,
+    error_send: Sender<ControlComms<Error>>,
 }
 
-// TODO uncomment once estop on the pi thread is actually implemented
-// impl EStopCallback for PiCtrlCallbacks {
-//     fn estop(&self) {
-//         self.estop_send
-//             .send(ControlComms::Msg(EStopComms::EStop))
-//             .unwrap()
-//     }
-// }
+impl PiCallbacks {
+    pub(self) fn new(
+        state: Arc<RwLock<State>>,
+        executor_stopper: ExecutorStopper,
+        estop_send: Sender<ControlComms<EStopComms>>,
+        error_send: Sender<ControlComms<Error>>,
+    ) -> Self {
+        Self {
+            state,
+            executor_stopper,
+            estop_send,
+            error_send,
+        }
+    }
+}
+
+impl EStopCallback for PiCallbacks {
+    fn estop(&self) {
+        self.estop_send
+            .send(ControlComms::Msg(EStopComms::EStop))
+            .unwrap()
+    }
+}
+
+impl ErrorCallback for PiCallbacks {
+    fn err(&self, err: Error) {
+        let mut state = self.state.write().unwrap();
+        state.stop();
+        self.executor_stopper.stop();
+        self.error_send.send(ControlComms::Msg(err)).unwrap()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct HwCtrl {
@@ -155,10 +180,18 @@ impl HwCtrl {
         // can for example report an error until all parts are fully initialised
         let _lock = state.write().unwrap();
         let (pi_stopper, pi_start) = pi::init();
-        let pi_ctrl = pi_start(settings.clone(), error_send.clone())?;
-        let pi_ctrl = Arc::new(pi_ctrl);
-        let (estop_send, estop_recv) = channel::unbounded();
         let (exec_stopper, exec_start) = execute::init();
+        let (estop_send, estop_recv) = channel::unbounded();
+        let pi_ctrl = pi_start(
+            settings.clone(),
+            PiCallbacks::new(
+                Arc::clone(&state),
+                exec_stopper,
+                estop_send.clone(),
+                error_send.clone(),
+            ),
+        )?;
+        let pi_ctrl = Arc::new(pi_ctrl);
         let (estop_handle, executor_ctrl) = exec_start(
             settings.clone(),
             pi_ctrl.clone(),
@@ -258,10 +291,12 @@ impl HwCtrl {
     pub fn estop(&self) {
         self.estop_send
             .send(ControlComms::Msg(EStopComms::EStop))
-            .unwrap()
+            .unwrap();
+        self.pi_ctrl.estop();
     }
 
     pub fn exit(self) {
+        // drop to make sure they stop before the estop
         drop(self.executor_ctrl);
         drop(self.pi_ctrl);
         self.estop_send.send(ControlComms::Exit).unwrap();
